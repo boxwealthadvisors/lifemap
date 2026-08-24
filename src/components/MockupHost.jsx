@@ -23,7 +23,6 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
   const persistChainRef = useRef(Promise.resolve())
   const pageRef = useRef(page)
   const [authOpen, setAuthOpen] = useState(false)
-  const [authTab, setAuthTab] = useState('login')
   const [planReady, setPlanReady] = useState(false)
   const baseSrc = mockupSrc(page)
   const src = owned ? `${baseSrc}?owned=1` : baseSrc
@@ -74,7 +73,6 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       const id = userId || effectiveUserId
       if (!id) {
         pendingSaveRef.current = snapshot
-        setAuthTab('register')
         setAuthOpen(true)
         return
       }
@@ -189,7 +187,6 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
           navigate('/profile')
           return
         }
-        setAuthTab('login')
         setAuthOpen(true)
         return
       }
@@ -243,7 +240,6 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
             setAuthOpen(false)
             pendingSaveRef.current = null
           }}
-          defaultTab={authTab}
           onAuthenticated={onAuthenticated}
         />
       )}

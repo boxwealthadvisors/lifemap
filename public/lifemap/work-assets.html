@@ -1172,13 +1172,13 @@ document.querySelectorAll(".pmore").forEach(btn => {
     });
   });
 
-  document.querySelectorAll(".tier0 .tlink, .tier0 .btn").forEach(function(a){
+  document.querySelectorAll(".tier0 .tlink, .tier0 .btn, .wallcta .btn, .wallcta a").forEach(function(a){
     a.addEventListener("click", function(e){
       if (a.closest && a.closest(".lm-acct")) return;
       e.preventDefault();
       var text = (a.textContent || "").replace(/\s+/g," ").trim();
-      if (/sign in/i.test(text)) post("auth", { action: "signin", label: text });
-      else if (/save/i.test(text)) post("save", getState());
+      if (/save/i.test(text) && !a.closest(".wallcta")) post("save", getState());
+      else post("auth", { action: "signin", label: text });
     });
   });
 

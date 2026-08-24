@@ -1854,19 +1854,14 @@ export default function OriginalLifeSheet() {
         <div className="lifemap-alert">
           <AlertTriangle className="h-4 w-4" />
           <div className="flex-1">
-            Your data won’t be saved if you are not registered with us. Also, you won’t be
-            able to use the calculator to its full potential. Create an account with us if
-            you haven’t yet. Log in and use the calculator to its full potential.
+            Your data won’t be saved if you are not signed in. Ask your advisor to create
+            an account, then sign in to use the calculator to its full potential.
           </div>
           <div className="flex items-center gap-2">
             <Button onClick={() => {
               setAuthModalTab('login')
               setShowAuthModal(true)
-            }}>Login</Button>
-            <Button variant="outline" onClick={() => {
-              setAuthModalTab('register')
-              setShowAuthModal(true)
-            }}>Register</Button>
+            }}>Sign in</Button>
           </div>
         </div>
       )}
@@ -2079,9 +2074,8 @@ export default function OriginalLifeSheet() {
                   </>
                 ) : (
                   <>
-                    <button type="button" className="lm-btn" onClick={() => { setAuthModalTab('register'); setShowAuthModal(true) }}>Create a free account</button>
-                    <button type="button" className="lm-btn lm-btn-ghost" onClick={() => { setAuthModalTab('login'); setShowAuthModal(true) }}>I already have one</button>
-                    <small>Takes about 30 seconds. Your numbers carry over.</small>
+                    <button type="button" className="lm-btn" onClick={() => { setAuthModalTab('login'); setShowAuthModal(true) }}>Sign in</button>
+                    <small>Accounts are created by an admin.</small>
                   </>
                 )}
               </div>

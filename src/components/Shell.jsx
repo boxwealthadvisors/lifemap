@@ -227,7 +227,7 @@ export default function Shell({ children, adminMode = false, activeSection, onSe
             ) : user ? (
               <button type="button" className="lm-btn" onClick={() => navigate('/profile')}>Save my plan</button>
             ) : (
-              <button type="button" className="lm-btn" onClick={() => openAuth('register')}>Save my plan</button>
+              <button type="button" className="lm-btn" onClick={() => openAuth('login')}>Save my plan</button>
             )}
           </span>
         </div>
