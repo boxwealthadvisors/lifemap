@@ -9,7 +9,7 @@ import { AccountSettingsModal, EditUserModal } from '../components/AccountSettin
 import ClientPlanView from '../components/ClientPlanView';
 
 export default function AdminPage() {
-  const { admin, setAdmin, adminLogout, isAdmin } = useAuth();
+  const { admin, setAdmin, adminLogout, isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [clients, setClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -25,12 +25,17 @@ export default function AdminPage() {
   });
 
   useEffect(() => {
+    if (authLoading) return;
+    if (admin?.role === 'super_admin') {
+      navigate('/super-admin');
+      return;
+    }
     if (!isAdmin) {
-      navigate('/admin/login');
+      navigate('/?signin=1');
       return;
     }
     loadClients();
-  }, [isAdmin, navigate]);
+  }, [authLoading, isAdmin, admin, navigate]);
 
   const loadClients = async () => {
     try {
@@ -77,7 +82,7 @@ export default function AdminPage() {
     window.location.href = '/';
   };
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <LifemapAdminShell title="Admin" kicker="BOX Wealth">
         <div className="lm-card" style={{ padding: 48, textAlign: 'center', color: 'var(--lm-muted)' }}>Loading…</div>

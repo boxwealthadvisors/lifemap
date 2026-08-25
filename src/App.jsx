@@ -1,5 +1,5 @@
 import React from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ChartProvider } from './contexts/ChartContext'
 import Shell from './components/Shell.jsx'
@@ -9,9 +9,7 @@ import InsurancePage from './pages/InsurancePage.jsx'
 import GrowthAssumptionsPage from './pages/GrowthAssumptionsPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
 import SuperAdminPage from './pages/SuperAdminPage.jsx'
-import SuperAdminLoginPage from './pages/SuperAdminLoginPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
-import AdminLoginPage from './pages/AdminLoginPage.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { Toaster } from './components/ui/sonner.jsx'
 import './App.css'
@@ -59,9 +57,9 @@ function App() {
                   </Shell>
                 } />
                 {/* Admin Routes - without Shell navigation */}
-                <Route path="/super-admin/login" element={<SuperAdminLoginPage />} />
+                <Route path="/super-admin/login" element={<Navigate to="/?signin=1" replace />} />
                 <Route path="/super-admin" element={<SuperAdminPage />} />
-                <Route path="/admin/login" element={<AdminLoginPage />} />
+                <Route path="/admin/login" element={<Navigate to="/?signin=1" replace />} />
                 <Route path="/admin" element={<AdminPage />} />
               </Routes>
               <Toaster />

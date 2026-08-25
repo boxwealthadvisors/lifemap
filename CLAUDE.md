@@ -99,9 +99,11 @@ Three roles:
 
 | Role | Table | How they sign in | What they can do |
 |---|---|---|---|
-| Super admin | `super_admin` | https://lifemap.finance/super-admin/login | Create/edit **admins**, assign clients. Click a client in the **client register** to open their LifeMap (same plan UI as the advisor). **Account**: own username and password. Can reset an advisor’s password via Edit admin. |
-| Admin (advisor) | `admin` | https://lifemap.finance/admin/login | See **their** clients, open a client’s LifeMap, edit it. **Account**: own username, name, email, password. Can edit a client’s name/email and **reset that client’s password** (only users with their `admin_id`). |
-| User (client) | `"user"` | https://lifemap.finance Sign in (email + password) | Edit their own plan and change their own password on Profile |
+| Super admin | `super_admin` | https://lifemap.finance Sign in with **username** | Create/edit **admins**, assign clients. Click a client in the **client register** to open their LifeMap. **Account**: own username and password. Can reset an advisor’s password via Edit admin. |
+| Admin (advisor) | `admin` | https://lifemap.finance Sign in with **username** | See **their** clients, open a client’s LifeMap, edit it. **Account**: own username, name, email, password. Can edit a client’s name/email and **reset that client’s password**. |
+| User (client) | `"user"` | https://lifemap.finance Sign in with **email** | Edit their own plan and change their own password on Profile |
+
+One Sign in box on the public app. `POST /api/login` with `{ identifier, password }` (or `{ email, password }`) checks client email, then advisor username, then super admin username, and returns `role` plus the right JWT. Old `/admin/login` and `/super-admin/login` pages redirect to that Sign in.
 
 Public self-signup is **closed**. `POST /api/register` returns 403. New clients are created by an admin (UI) or by this import (DB/API).
 
@@ -174,7 +176,7 @@ RETURNING id, email, name, created_at;
 | Column | Notes |
 |---|---|
 | `id` | PK |
-| `username` | unique, used at `/admin/login` (not email) |
+| `username` | unique, used at Sign in (not email) |
 | `password_hash` | bcrypt 12 |
 | `name`, `email` | optional |
 | `is_active` | default true |
@@ -192,7 +194,7 @@ If Arun is the only advisor, attach every imported `"user".admin_id` to his `adm
 
 | Column | Notes |
 |---|---|
-| `username` | unique; login at `/super-admin/login` |
+| `username` | unique; Sign in at https://lifemap.finance |
 | `password_hash` | bcrypt 12 |
 
 Not used for client logins. Do not import clients here.
@@ -375,7 +377,7 @@ Use `backend/scripts/bulk-import-clients.js` with the Render **External** Databa
 
 Dry-run first, then a 1-client test, then the rest. After import, Arun should:
 
-1. Open https://lifemap.finance/admin/login as the advisor  
+1. Open https://lifemap.finance, Sign in as the advisor (username)  
 2. See the new names in the client register  
 3. Open one plan (same mockup UI as the client)  
 4. Give that client their email + generated password to try Sign in
@@ -424,13 +426,13 @@ Admin editing a client uses the **same mockup UI** as the client (`MockupHost` +
 
 ## 7. Useful API notes (if importing via HTTP instead of SQL)
 
-Admin JWT from `POST /api/admin/admin/login` `{ username, password }`.
+User JWT from `POST /api/login` `{ identifier, password }` or `{ email, password }`. Response includes `role`: `client` | `admin` | `super_admin`.
+
+Admin JWT can still be minted from `POST /api/admin/admin/login` `{ username, password }` (kept for scripts). Prefer the unified Sign in.
 
 Create user (admin): `POST /api/admin/users` `{ email, password, name }` — sets `admin_id` from the token. Public `POST /api/register` is forbidden.
 
 Then plan data: either SQL, or `/api/admin/financial/...` with `?userId=<id>` and the admin token (see `src/services/api.js` `*ForUser` methods).
-
-User JWT from `POST /api/login` `{ email, password }`.
 
 ---
 

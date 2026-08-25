@@ -105,13 +105,28 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       setLoading(true);
-      const response = await ApiService.login(credentials);
-      if (response.token) {
-        localStorage.setItem('authToken', response.token);
+      const identifier = credentials.identifier || credentials.email || credentials.username;
+      const response = await ApiService.login({
+        identifier,
+        password: credentials.password,
+      });
+      const role = response.role || 'client';
+      if (role === 'admin' || role === 'super_admin') {
+        setAdmin(response.user);
+        setUser(null);
+        if (response.token) {
+          localStorage.setItem('adminToken', response.token);
+          localStorage.removeItem('authToken');
+        }
+      } else {
+        setUser(response.user);
+        setAdmin(null);
+        if (response.token) {
+          localStorage.setItem('authToken', response.token);
+          localStorage.removeItem('adminToken');
+        }
       }
-      setUser(response.user);
-      
-      return response;
+      return { ...response, role };
     } catch (error) {
       setError(error.message);
       throw error;

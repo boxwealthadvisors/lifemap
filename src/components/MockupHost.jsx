@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import AuthModal from './AuthModal'
 import { useAuth } from '../contexts/AuthContext'
@@ -9,7 +9,8 @@ import ApiService from '../services/api'
 
 export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
   const navigate = useNavigate()
-  const { user, isAuthenticated, logout, loading: authLoading } = useAuth()
+  const location = useLocation()
+  const { user, isAuthenticated, logout, loading: authLoading, admin } = useAuth()
   const adminUser = useAdminUser()
   const isAdminMode = !!adminUser?.userId
   const effectiveUserId = isAdminMode ? adminUser.userId : (user?.id || null)
@@ -111,6 +112,19 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
   useEffect(() => {
     if (!isAuthenticated && !isAdminMode) api()?.setAccount(null)
   }, [isAuthenticated, isAdminMode])
+
+  useEffect(() => {
+    if (authLoading || isAdminMode) return
+    if (admin?.role === 'super_admin') {
+      navigate('/super-admin', { replace: true })
+      return
+    }
+    if (admin) {
+      navigate('/admin', { replace: true })
+      return
+    }
+    if (new URLSearchParams(location.search).get('signin')) setAuthOpen(true)
+  }, [authLoading, admin, isAdminMode, location.search, navigate])
 
   useEffect(() => {
     if (authOpen) return

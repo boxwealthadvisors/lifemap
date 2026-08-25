@@ -9,7 +9,7 @@ import { AccountSettingsModal } from '../components/AccountSettingsModal';
 import ClientPlanView from '../components/ClientPlanView';
 
 export default function SuperAdminPage() {
-  const { admin, setAdmin, adminLogout, isSuperAdmin } = useAuth();
+  const { admin, setAdmin, adminLogout, isSuperAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [admins, setAdmins] = useState([]);
   const [users, setUsers] = useState([]);
@@ -28,12 +28,13 @@ export default function SuperAdminPage() {
   });
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isSuperAdmin) {
-      navigate('/super-admin/login');
+      navigate('/?signin=1');
       return;
     }
     loadData();
-  }, [isSuperAdmin, navigate]);
+  }, [authLoading, isSuperAdmin, navigate]);
 
   const loadData = async () => {
     try {
@@ -138,7 +139,7 @@ export default function SuperAdminPage() {
     </>
   );
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <LifemapAdminShell title="Super admin" kicker="BOX Wealth">
         <div className="lm-card" style={{ padding: 48, textAlign: 'center', color: 'var(--lm-muted)' }}>Loading…</div>

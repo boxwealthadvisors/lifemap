@@ -29,10 +29,6 @@ export function LifemapFooter() {
         </span>
         <span className="lm-footer-tag">Invest with Intent.</span>
         <span style={{ marginLeft: 'auto' }}>
-          <Link to="/admin/login">Admin</Link>
-          {' · '}
-          <Link to="/super-admin/login">Super admin</Link>
-          {' · '}
           <a href="#">Terms</a>
           {' · '}
           <a href="#">Privacy</a>
@@ -82,10 +78,6 @@ export function LifemapGate({ title, subtitle, children }) {
         {children}
         <p className="sub" style={{ marginTop: 18, marginBottom: 0 }}>
           <Link to="/">Back to LifeMap</Link>
-          {' · '}
-          <Link to="/admin/login">Admin</Link>
-          {' · '}
-          <Link to="/super-admin/login">Super admin</Link>
         </p>
       </div>
     </div>

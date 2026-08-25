@@ -2079,11 +2079,6 @@ export default function OriginalLifeSheet() {
                   </>
                 )}
               </div>
-              <div style={{ marginTop: 18 }}>
-                <Link to="/admin/login" className="lm-tlink" style={{ padding: 0 }}>Admin Login</Link>
-                <span style={{ color: 'var(--lm-slate)', margin: '0 8px' }}>·</span>
-                <Link to="/super-admin/login" className="lm-tlink" style={{ padding: 0 }}>Super Admin Login</Link>
-              </div>
             </div>
             <div className="lm-preview" aria-hidden="true">
               <div className="stack">

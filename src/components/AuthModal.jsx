@@ -3,14 +3,15 @@ import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Label } from '@/components/ui/label.jsx';
 import { Alert, AlertDescription } from '@/components/ui/alert.jsx';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { X } from 'lucide-react';
 
 const AuthModal = ({ isOpen, onClose, onAuthenticated }) => {
   const { login, error, loading, clearError } = useAuth();
+  const navigate = useNavigate();
   const [loginForm, setLoginForm] = useState({
-    email: '',
+    identifier: '',
     password: ''
   });
 
@@ -18,9 +19,19 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated }) => {
     e.preventDefault();
     try {
       const response = await login(loginForm);
-      await onAuthenticated?.({ mode: 'login', user: response.user });
+      if (response.role === 'super_admin') {
+        onClose();
+        navigate('/super-admin');
+        return;
+      }
+      if (response.role === 'admin') {
+        onClose();
+        navigate('/admin');
+        return;
+      }
+      await onAuthenticated?.({ mode: 'login', user: response.user, role: 'client' });
       onClose();
-    } catch (error) {
+    } catch {
       // Error is handled by context
     }
   };
@@ -61,15 +72,16 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated }) => {
 
         <form onSubmit={handleLoginSubmit} className="stack">
           <div>
-            <Label htmlFor="login-email">Email</Label>
+            <Label htmlFor="login-identifier">Email or username</Label>
             <Input
-              id="login-email"
+              id="login-identifier"
               className="lm-inp"
-              type="email"
-              placeholder="Enter email address"
-              value={loginForm.email}
-              onChange={(e) => handleLoginChange('email', e.target.value)}
+              type="text"
+              placeholder="Client email, or admin username"
+              value={loginForm.identifier}
+              onChange={(e) => handleLoginChange('identifier', e.target.value)}
               required
+              autoComplete="username"
             />
           </div>
           <div>
@@ -82,6 +94,7 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated }) => {
               value={loginForm.password}
               onChange={(e) => handleLoginChange('password', e.target.value)}
               required
+              autoComplete="current-password"
             />
           </div>
           <Button type="submit" className="lm-btn" style={{ width: '100%', justifyContent: 'center' }} disabled={loading}>
@@ -89,12 +102,7 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated }) => {
           </Button>
         </form>
         <p className="sub" style={{ marginTop: 16, marginBottom: 0 }}>
-          Accounts are created by an admin. If you need one, ask your advisor.
-        </p>
-        <p className="sub" style={{ marginTop: 12, marginBottom: 0, textAlign: 'center' }}>
-          <Link to="/admin/login">Admin Login</Link>
-          <span style={{ color: 'var(--lm-slate)', margin: '0 8px' }}>·</span>
-          <Link to="/super-admin/login">Super Admin Login</Link>
+          Clients use the email their advisor set up. Advisors and super admins use their username.
         </p>
       </div>
     </div>

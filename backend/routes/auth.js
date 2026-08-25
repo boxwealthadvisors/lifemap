@@ -3,17 +3,89 @@ import bcrypt from 'bcryptjs';
 import { body, validationResult } from 'express-validator';
 import pool from '../config/database.js';
 import { generateToken, authenticateToken } from '../middleware/auth.js';
+import { generateAdminToken } from '../middleware/adminAuth.js';
 
 const router = express.Router();
+
+async function findByUsername(table, username) {
+  const exact = await pool.query(
+    `SELECT * FROM ${table} WHERE username = $1 LIMIT 1`,
+    [username]
+  );
+  if (exact.rows[0]) return exact.rows[0];
+  const loose = await pool.query(
+    `SELECT * FROM ${table} WHERE LOWER(username) = LOWER($1) LIMIT 1`,
+    [username]
+  );
+  return loose.rows[0] || null;
+}
+
+async function tryClientLogin(identifier, password) {
+  const email = identifier.trim().toLowerCase();
+  if (!email.includes('@')) return null;
+  const result = await pool.query(
+    'SELECT id, email, name, password_hash FROM "user" WHERE LOWER(email) = $1',
+    [email]
+  );
+  if (!result.rows[0]) return null;
+  const user = result.rows[0];
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return { miss: true };
+  return {
+    hit: {
+      role: 'client',
+      token: generateToken(user.id),
+      user: { id: user.id, email: user.email, name: user.name }
+    }
+  };
+}
+
+async function tryAdminLogin(identifier, password) {
+  const admin = await findByUsername('admin', identifier.trim());
+  if (!admin) return null;
+  const ok = await bcrypt.compare(password, admin.password_hash || '');
+  if (!ok) return { miss: true };
+  if (!admin.is_active) return { inactive: true };
+  return {
+    hit: {
+      role: 'admin',
+      token: generateAdminToken(admin.id, 'admin'),
+      user: {
+        id: admin.id,
+        username: admin.username,
+        name: admin.name,
+        email: admin.email,
+        role: 'admin'
+      }
+    }
+  };
+}
+
+async function trySuperAdminLogin(identifier, password) {
+  const superAdmin = await findByUsername('super_admin', identifier.trim());
+  if (!superAdmin) return null;
+  const ok = await bcrypt.compare(password, superAdmin.password_hash || '');
+  if (!ok) return { miss: true };
+  return {
+    hit: {
+      role: 'super_admin',
+      token: generateAdminToken(superAdmin.id, 'super_admin'),
+      user: {
+        id: superAdmin.id,
+        username: superAdmin.username,
+        role: 'super_admin'
+      }
+    }
+  };
+}
 
 // Public self-signup is closed. Admins create users from /admin.
 router.post('/register', (req, res) => {
   return res.status(403).json({ error: 'Accounts are created by an admin' });
 });
 
-// Login endpoint
+// Unified login: client (email), advisor (username), or super admin (username)
 router.post('/login', [
-  body('email').isEmail().withMessage('Please provide a valid email address'),
   body('password').notEmpty()
 ], async (req, res) => {
   try {
@@ -22,55 +94,35 @@ router.post('/login', [
       return res.status(400).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { email, password } = req.body;
-
-    // Find user
-    let result;
-    try {
-      result = await pool.query(
-        'SELECT id, email, name, password_hash FROM "user" WHERE email = $1',
-        [email]
-      );
-    } catch (dbError) {
-      console.error('Database error during login:', dbError);
-      return res.status(500).json({ error: 'Database error during login' });
+    const identifier = String(req.body.identifier || req.body.email || req.body.username || '').trim();
+    const { password } = req.body;
+    if (!identifier) {
+      return res.status(400).json({ error: 'Enter your email or username' });
     }
 
-    // Check if result is valid and has rows
-    if (!result || !result.rows || result.rows.length === 0) {
-      console.log('Login failed: No user found for email:', email);
-      return res.status(401).json({ error: 'Invalid credentials' });
+    const order = identifier.includes('@')
+      ? [tryClientLogin, tryAdminLogin, trySuperAdminLogin]
+      : [tryAdminLogin, trySuperAdminLogin, tryClientLogin];
+
+    for (const attempt of order) {
+      const result = await attempt(identifier, password);
+      if (!result) continue;
+      if (result.inactive) {
+        return res.status(403).json({ error: 'Admin account is inactive. Please contact super admin to activate your account.' });
+      }
+      if (result.hit) {
+        return res.json({
+          message: 'Login successful',
+          role: result.hit.role,
+          user: result.hit.user,
+          token: result.hit.token
+        });
+      }
     }
 
-    const user = result.rows[0];
-
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
-    if (!isValidPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const token = generateToken(user.id);
-
-    res.json({
-      message: 'Login successful',
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name
-      },
-      token
-    });
+    return res.status(401).json({ error: 'Invalid credentials' });
   } catch (error) {
     console.error('Login error:', error);
-    
-    // Handle specific database errors
-    if (error.code === '23505') { // Unique constraint violation
-      return res.status(400).json({ error: 'Account already exists with this information.' });
-    } else if (error.code === '23503') { // Foreign key constraint violation
-      return res.status(400).json({ error: 'Invalid account information.' });
-    }
-    
     res.status(500).json({ error: 'Internal server error' });
   }
 });
