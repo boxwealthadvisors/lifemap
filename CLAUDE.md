@@ -1,12 +1,14 @@
-# LifeMap — handover for Claude (Arun)
+# LifeMap — instructions for Codex (Arun)
 
-This file is the source of truth for any Claude (or other agent) connected to this GitHub repo and the live Render stack.
+You are **Codex** working in the LifeMap repo. Read this entire file before you change code or the live database. This is the only agent instruction file.
 
-**Product:** LifeMap by BOX Wealth — a financial-planning app. A client signs in, fills FP Calculator / Assets / Work assets / Goals / Loans / Expenses / Insurance, and the plan is stored in Postgres. An advisor (admin) can open that same plan and edit it. Super admin creates advisors.
+**Arun:** Codex does not open this file automatically. In the first Codex thread, attach `CLAUDE.md` (or `@CLAUDE.md`) and tell it to follow these instructions. Then give it the client dump files.
 
-**First job after handover:** take Arun’s unlinked client dumps (CSV / XLSX / SQL / whatever) and load them into **Render Postgres** so each client can sign in on https://lifemap.finance with a generated password. Return the login list to Arun. Map what you can. Tell Arun clearly what is missing or cannot be stored.
+**Do not** invent tables, drop data, or set `DATABASE_INIT=true`. **Do not** paste bulk SQL into Render Shell.
 
-Do not invent schema. Do not drop tables. Do not set `DATABASE_INIT=true`.
+**First job:** Arun will give you unlinked client files (CSV / XLSX / dumps). Convert them to the CSV templates, run `backend/scripts/bulk-import-clients.js` against the Render **External** Postgres URL, return `passwords.csv` to Arun privately, and list anything you could not import. Exact steps are under **How you update the live database (bulk)** below.
+
+**Product:** LifeMap by BOX Wealth. A client signs in, fills FP Calculator / Assets / Work assets / Goals / Loans / Expenses / Insurance, and the plan is stored in Postgres. An advisor (admin) can open that same plan and edit it. Super admin creates advisors. Public self-signup is closed.
 
 ---
 
@@ -42,7 +44,7 @@ Backend env (do not wipe):
 
 **Never set `DATABASE_INIT=true`.** That runs a wipe-and-recreate script.
 
-### How Claude updates the live database (bulk)
+### How you update the live database (bulk)
 
 **Do not use Render Shell for bulk upload.** Shell is fine for a one-line `SELECT`, not for 50–500 clients, xlsx files, or generated passwords. You cannot usefully drop Arun’s spreadsheets into that shell.
 
@@ -142,7 +144,7 @@ Rules:
 
 ---
 
-## 4. Tables Claude must know
+## 4. Tables you must know
 
 ### 4.1 `"user"` — client login
 
@@ -369,7 +371,7 @@ Store rupees as numbers. `1500000` not `"15L"`. Convert L/Cr in the importer (`1
 
 ### 5.6 How to run it
 
-Use `backend/scripts/bulk-import-clients.js` with the Render **External** Database URL (see “How Claude updates the live database” above). Templates: `backend/scripts/import-templates/`.
+Use `backend/scripts/bulk-import-clients.js` with the Render **External** Database URL (see **How you update the live database (bulk)** above). Templates: `backend/scripts/import-templates/`.
 
 Dry-run first, then a 1-client test, then the rest. After import, Arun should:
 
@@ -389,7 +391,7 @@ Dry-run first, then a 1-client test, then the rest. After import, Arun should:
 
 ---
 
-## 6. How Claude should change the product later
+## 6. How you change the product later
 
 | Kind of change | Where |
 |---|---|
