@@ -4,25 +4,21 @@ import ApiService from '../services/api';
 import { Trash2, Edit } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import Shell from '../components/Shell';
-import MockupHost from '../components/MockupHost';
 import { LifemapAdminShell } from '../components/LifemapChrome';
-import { AdminUserProvider } from '../contexts/AdminUserContext';
-import AdminInsurancePage from './AdminInsurancePage';
 import { AccountSettingsModal, EditUserModal } from '../components/AccountSettingsModal';
+import ClientPlanView from '../components/ClientPlanView';
 
 export default function AdminPage() {
   const { admin, setAdmin, adminLogout, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [clients, setClients] = useState([]);
+  const [selectedClient, setSelectedClient] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [showCreateClient, setShowCreateClient] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
-  const [editUser, setEditUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('users');
+  const [editClient, setEditClient] = useState(null);
 
-  const [userForm, setUserForm] = useState({
+  const [clientForm, setClientForm] = useState({
     email: '',
     password: '',
     name: '',
@@ -33,50 +29,46 @@ export default function AdminPage() {
       navigate('/admin/login');
       return;
     }
-    loadUsers();
+    loadClients();
   }, [isAdmin, navigate]);
 
-  const loadUsers = async () => {
+  const loadClients = async () => {
     try {
       setLoading(true);
       const response = await ApiService.getAdminUsers();
-      console.log('📋 Loaded users:', { count: response.users?.length || 0, users: response.users });
-      setUsers(response.users || []);
+      setClients(response.users || []);
     } catch (error) {
-      console.error('❌ Failed to load users:', error);
-      toast.error('Failed to load users: ' + error.message);
+      console.error('Failed to load clients:', error);
+      toast.error('Failed to load clients: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateUser = async (e) => {
+  const handleCreateClient = async (e) => {
     e.preventDefault();
     try {
-      await ApiService.createUser(userForm);
-      toast.success('User created successfully');
-      setShowCreateUser(false);
-      setUserForm({ email: '', password: '', name: '' });
-      loadUsers();
+      await ApiService.createUser(clientForm);
+      toast.success('Client created');
+      setShowCreateClient(false);
+      setClientForm({ email: '', password: '', name: '' });
+      loadClients();
     } catch (error) {
-      toast.error('Failed to create user: ' + error.message);
+      toast.error('Failed to create client: ' + error.message);
     }
   };
 
-  const handleDeleteUser = async (userId) => {
-    if (!confirm('Are you sure you want to delete this user? All their data will be deleted.')) {
+  const handleDeleteClient = async (clientId) => {
+    if (!confirm('Delete this client? All of their plan data will be deleted.')) {
       return;
     }
     try {
-      await ApiService.deleteUser(userId);
-      toast.success('User deleted successfully');
-      if (selectedUser?.id === userId) {
-        setSelectedUser(null);
-        setActiveTab('users');
-      }
-      loadUsers();
+      await ApiService.deleteUser(clientId);
+      toast.success('Client deleted');
+      if (selectedClient?.id === clientId) setSelectedClient(null);
+      loadClients();
     } catch (error) {
-      toast.error('Failed to delete user: ' + error.message);
+      toast.error('Failed to delete client: ' + error.message);
     }
   };
 
@@ -93,22 +85,19 @@ export default function AdminPage() {
     );
   }
 
-  if (selectedUser && activeTab === 'user-view') {
+  if (selectedClient) {
     return (
-      <UserDataView
-        userId={selectedUser.id}
-        userName={selectedUser.name}
-        onBack={() => {
-          setActiveTab('users');
-          setSelectedUser(null);
-        }}
+      <ClientPlanView
+        clientId={selectedClient.id}
+        clientName={selectedClient.name || selectedClient.email}
+        onBack={() => setSelectedClient(null)}
       />
     );
   }
 
   return (
     <LifemapAdminShell
-      title="Your users"
+      title="Your clients"
       kicker={`Signed in as ${admin?.name || admin?.username || 'Admin'}`}
       actions={(
         <span style={{ display: 'flex', gap: 8 }}>
@@ -119,10 +108,10 @@ export default function AdminPage() {
     >
       <div className="lm-card">
         <div className="lm-reghead">
-          <h3>User register</h3>
-          <span className="count">{users.length} people</span>
+          <h3>Client register</h3>
+          <span className="count">{clients.length} clients</span>
           <div className="r">
-            <button type="button" className="lm-ghost primary" onClick={() => setShowCreateUser(true)}>+ Create user</button>
+            <button type="button" className="lm-ghost primary" onClick={() => setShowCreateClient(true)}>+ Create client</button>
           </div>
         </div>
         <div className="lm-tblwrap">
@@ -136,29 +125,26 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {users.length === 0 ? (
+              {clients.length === 0 ? (
                 <tr>
-                  <td className="empty" colSpan={4}>No users assigned to you yet</td>
+                  <td className="empty" colSpan={4}>No clients assigned to you yet</td>
                 </tr>
-              ) : users.map((user) => (
+              ) : clients.map((client) => (
                 <tr
-                  key={user.id}
-                  className={selectedUser?.id === user.id ? 'on' : ''}
-                  onClick={() => {
-                    setSelectedUser(user);
-                    setActiveTab('user-view');
-                  }}
+                  key={client.id}
+                  className={selectedClient?.id === client.id ? 'on' : ''}
+                  onClick={() => setSelectedClient(client)}
                   style={{ cursor: 'pointer' }}
                 >
-                  <td>{user.email}</td>
-                  <td>{user.name}</td>
-                  <td>{user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}</td>
+                  <td>{client.email}</td>
+                  <td>{client.name}</td>
+                  <td>{client.created_at ? new Date(client.created_at).toLocaleDateString() : '—'}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                      <button type="button" className="lm-iconbtn" onClick={() => setEditUser(user)} aria-label="Edit user">
+                      <button type="button" className="lm-iconbtn" onClick={() => setEditClient(client)} aria-label="Edit client">
                         <Edit className="h-4 w-4" />
                       </button>
-                      <button type="button" className="lm-iconbtn danger" onClick={() => handleDeleteUser(user.id)} aria-label="Delete user">
+                      <button type="button" className="lm-iconbtn danger" onClick={() => handleDeleteClient(client.id)} aria-label="Delete client">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
@@ -179,38 +165,38 @@ export default function AdminPage() {
         />
       ) : null}
 
-      {editUser ? (
+      {editClient ? (
         <EditUserModal
-          user={editUser}
-          onClose={() => setEditUser(null)}
+          user={editClient}
+          onClose={() => setEditClient(null)}
           onSaved={(updated) => {
-            setUsers((prev) => prev.map((u) => (u.id === updated.id ? { ...u, ...updated } : u)));
-            if (selectedUser?.id === updated.id) setSelectedUser({ ...selectedUser, ...updated });
+            setClients((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+            if (selectedClient?.id === updated.id) setSelectedClient({ ...selectedClient, ...updated });
           }}
         />
       ) : null}
 
-      {showCreateUser ? (
-        <div className="lm-modal-overlay" onClick={() => setShowCreateUser(false)}>
+      {showCreateClient ? (
+        <div className="lm-modal-overlay" onClick={() => setShowCreateClient(false)}>
           <div className="lm-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Create user</h2>
+            <h2>Create client</h2>
             <p className="sub">They will be able to sign in and save a plan.</p>
-            <form onSubmit={handleCreateUser} className="stack">
+            <form onSubmit={handleCreateClient} className="stack">
               <div>
                 <label htmlFor="new-email">Email</label>
-                <input id="new-email" className="lm-inp" type="email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} required />
+                <input id="new-email" className="lm-inp" type="email" value={clientForm.email} onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })} required />
               </div>
               <div>
                 <label htmlFor="new-password">Password</label>
-                <input id="new-password" className="lm-inp" type="password" value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} required minLength={6} />
+                <input id="new-password" className="lm-inp" type="password" value={clientForm.password} onChange={(e) => setClientForm({ ...clientForm, password: e.target.value })} required minLength={6} />
               </div>
               <div>
                 <label htmlFor="new-name">Name</label>
-                <input id="new-name" className="lm-inp" value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} required />
+                <input id="new-name" className="lm-inp" value={clientForm.name} onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })} required />
               </div>
               <div className="lm-modal-acts">
-                <button type="button" className="lm-ghost" onClick={() => setShowCreateUser(false)}>Cancel</button>
-                <button type="submit" className="lm-btn">Create user</button>
+                <button type="button" className="lm-ghost" onClick={() => setShowCreateClient(false)}>Cancel</button>
+                <button type="submit" className="lm-btn">Create client</button>
               </div>
             </form>
           </div>
@@ -219,73 +205,3 @@ export default function AdminPage() {
     </LifemapAdminShell>
   );
 }
-
-const PAGE_BY_SECTION = {
-  dashboard: 'fp',
-  assets: 'assets',
-  'work-assets': 'work',
-  goals: 'goals',
-  loans: 'loans',
-  expenses: 'expenses',
-};
-
-function sectionFromPath(path) {
-  const clean = String(path || '').split('?')[0];
-  if (clean === '/' || clean === '') return 'dashboard';
-  if (clean === '/assets') return 'assets';
-  if (clean === '/work-assets') return 'work-assets';
-  if (clean === '/goals') return 'goals';
-  if (clean === '/loans') return 'loans';
-  if (clean === '/expenses') return 'expenses';
-  if (clean === '/insurance') return 'insurance';
-  return null;
-}
-
-function UserDataView({ userId, userName, onBack }) {
-  const [activeSection, setActiveSection] = useState('dashboard');
-  const { admin, adminLogout } = useAuth();
-
-  const handleAdminLogout = async () => {
-    await adminLogout();
-    window.location.href = '/';
-  };
-
-  return (
-    <AdminUserProvider userId={userId}>
-      <div className="lm-admin-plan">
-        <div className="lm-admin-plan-bar">
-          <button type="button" className="lm-tlink" onClick={onBack}>← All users</button>
-          <span className="lm-admin-plan-who">Viewing {userName}</span>
-          <span className="lm-admin-plan-acts">
-            <span>{admin?.name || admin?.username || 'Admin'}</span>
-            <button type="button" className="lm-btn" onClick={handleAdminLogout}>Logout</button>
-          </span>
-        </div>
-        {activeSection === 'insurance' ? (
-          <div className="lm-admin-plan-insurance">
-            <Shell
-              adminMode
-              activeSection="insurance"
-              onSectionChange={setActiveSection}
-              adminUserName={admin?.name || admin?.username}
-              userName={userName}
-            >
-              <AdminInsurancePage />
-            </Shell>
-          </div>
-        ) : (
-          <MockupHost
-            page={PAGE_BY_SECTION[activeSection]}
-            accountLabel={userName}
-            onNavigate={(path) => {
-              const next = sectionFromPath(path);
-              if (next) setActiveSection(next);
-            }}
-            onExit={onBack}
-          />
-        )}
-      </div>
-    </AdminUserProvider>
-  );
-}
-

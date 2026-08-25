@@ -177,7 +177,7 @@ export default function Shell({ children, adminMode = false, activeSection, onSe
           )}
           <span className="lm-acts">
             {adminMode && onBack ? (
-              <button type="button" className="lm-tlink" onClick={onBack}>All users</button>
+              <button type="button" className="lm-tlink" onClick={onBack}>All clients</button>
             ) : null}
             {adminMode && admin ? (
               <span className="lm-tlink" style={{ cursor: 'default' }}>

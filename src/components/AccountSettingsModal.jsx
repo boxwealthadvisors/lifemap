@@ -192,13 +192,13 @@ export function EditUserModal({ user, onClose, onSaved }) {
       onSaved(response.user);
       if (form.password) {
         setIssuedPassword(form.password);
-        toast.success('User updated. Copy the new password and give it to them privately.');
+        toast.success('Client updated. Copy the new password and give it to them privately.');
         return;
       }
-      toast.success('User updated');
+      toast.success('Client updated');
       onClose();
     } catch (error) {
-      toast.error(error.message || 'Failed to update user');
+      toast.error(error.message || 'Failed to update client');
     } finally {
       setSaving(false);
     }
@@ -207,7 +207,7 @@ export function EditUserModal({ user, onClose, onSaved }) {
   return (
     <div className="lm-modal-overlay" onClick={issuedPassword ? undefined : onClose}>
       <div className="lm-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Edit user</h2>
+        <h2>Edit client</h2>
         {issuedPassword ? (
           <div className="stack">
             <p className="sub">Give this password to the client. LifeMap will not show it again.</p>

@@ -7,7 +7,7 @@ export default function AdminInsurancePage() {
   const { userId } = useAdminUser();
   
   if (!userId) {
-    return <div>No user selected</div>;
+    return <div>No client selected</div>;
   }
 
   return (

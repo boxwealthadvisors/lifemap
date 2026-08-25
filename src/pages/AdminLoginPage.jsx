@@ -29,7 +29,7 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <LifemapGate title="Admin sign in" subtitle="Manage the plans assigned to you.">
+    <LifemapGate title="Admin sign in" subtitle="Manage the client plans assigned to you.">
       <form onSubmit={handleSubmit} className="stack">
         <div>
           <label htmlFor="admin-user">Username</label>

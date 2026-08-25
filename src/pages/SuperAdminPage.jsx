@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { LifemapAdminShell } from '../components/LifemapChrome';
 import { AccountSettingsModal } from '../components/AccountSettingsModal';
+import ClientPlanView from '../components/ClientPlanView';
 
 export default function SuperAdminPage() {
   const { admin, setAdmin, adminLogout, isSuperAdmin } = useAuth();
@@ -15,8 +16,9 @@ export default function SuperAdminPage() {
   const [loading, setLoading] = useState(true);
   const [showCreateAdmin, setShowCreateAdmin] = useState(false);
   const [showEditAdmin, setShowEditAdmin] = useState(null);
-  const [showTransferUser, setShowTransferUser] = useState(null);
+  const [showTransferClient, setShowTransferClient] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
 
   const [adminForm, setAdminForm] = useState({
     username: '',
@@ -87,7 +89,7 @@ export default function SuperAdminPage() {
   };
 
   const handleDeleteAdmin = async (adminId) => {
-    if (!confirm('Are you sure you want to delete this admin? Users assigned to this admin will be unassigned.')) {
+    if (!confirm('Delete this admin? Clients assigned to them will be unassigned.')) {
       return;
     }
     try {
@@ -99,14 +101,14 @@ export default function SuperAdminPage() {
     }
   };
 
-  const handleTransferUser = async (userId, adminId) => {
+  const handleTransferClient = async (clientId, adminId) => {
     try {
-      await ApiService.transferUser(userId, adminId || null);
-      toast.success('User transferred successfully');
-      setShowTransferUser(null);
+      await ApiService.transferUser(clientId, adminId || null);
+      toast.success('Client transferred');
+      setShowTransferClient(null);
       loadData();
     } catch (error) {
-      toast.error('Failed to transfer user: ' + error.message);
+      toast.error('Failed to transfer client: ' + error.message);
     }
   };
 
@@ -144,9 +146,19 @@ export default function SuperAdminPage() {
     );
   }
 
+  if (selectedClient) {
+    return (
+      <ClientPlanView
+        clientId={selectedClient.id}
+        clientName={selectedClient.name || selectedClient.email}
+        onBack={() => setSelectedClient(null)}
+      />
+    );
+  }
+
   return (
     <LifemapAdminShell
-      title="Admins and users"
+      title="Admins and clients"
       kicker={`Signed in as ${admin?.username || 'Super admin'}`}
       actions={(
         <span style={{ display: 'flex', gap: 8 }}>
@@ -170,7 +182,7 @@ export default function SuperAdminPage() {
                 <th>Username</th>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Users</th>
+                <th>Clients</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -209,8 +221,8 @@ export default function SuperAdminPage() {
 
       <div className="lm-card">
         <div className="lm-reghead">
-          <h3>User register</h3>
-          <span className="count">{users.length} people</span>
+          <h3>Client register</h3>
+          <span className="count">{users.length} clients</span>
         </div>
         <div className="lm-tblwrap">
           <table className="lm-tbl">
@@ -224,14 +236,18 @@ export default function SuperAdminPage() {
             </thead>
             <tbody>
               {users.length === 0 ? (
-                <tr><td className="empty" colSpan={4}>No users yet</td></tr>
+                <tr><td className="empty" colSpan={4}>No clients yet</td></tr>
               ) : users.map((u) => (
-                <tr key={u.id}>
+                <tr
+                  key={u.id}
+                  onClick={() => setSelectedClient(u)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <td>{u.email}</td>
                   <td>{u.name}</td>
                   <td>{u.admin_username || 'Unassigned'}</td>
-                  <td>
-                    <button type="button" className="lm-ghost" onClick={() => setShowTransferUser(u.id)}>Transfer</button>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button type="button" className="lm-ghost" onClick={() => setShowTransferClient(u.id)}>Transfer</button>
                   </td>
                 </tr>
               ))}
@@ -288,11 +304,11 @@ export default function SuperAdminPage() {
         </div>
       ) : null}
 
-      {showTransferUser ? (
-        <div className="lm-modal-overlay" onClick={() => setShowTransferUser(null)}>
+      {showTransferClient ? (
+        <div className="lm-modal-overlay" onClick={() => setShowTransferClient(null)}>
           <div className="lm-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Transfer user</h2>
-            <p className="sub">Move this person to another admin, or leave them unassigned.</p>
+            <h2>Transfer client</h2>
+            <p className="sub">Move this client to another admin, or leave them unassigned.</p>
             <div className="stack">
               <div>
                 <label htmlFor="xfer-admin">Admin</label>
@@ -300,7 +316,7 @@ export default function SuperAdminPage() {
                   id="xfer-admin"
                   className="lm-inp"
                   defaultValue=""
-                  onChange={(e) => handleTransferUser(showTransferUser, e.target.value === 'none' ? null : parseInt(e.target.value, 10))}
+                  onChange={(e) => handleTransferClient(showTransferClient, e.target.value === 'none' ? null : parseInt(e.target.value, 10))}
                 >
                   <option value="" disabled>Select admin</option>
                   <option value="none">Unassigned</option>
@@ -310,7 +326,7 @@ export default function SuperAdminPage() {
                 </select>
               </div>
               <div className="lm-modal-acts">
-                <button type="button" className="lm-ghost" onClick={() => setShowTransferUser(null)}>Cancel</button>
+                <button type="button" className="lm-ghost" onClick={() => setShowTransferClient(null)}>Cancel</button>
               </div>
             </div>
           </div>

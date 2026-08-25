@@ -63,7 +63,7 @@ node scripts/bulk-import-clients.js --admin-username ADVISOR_USERNAME --users .\
 ```
 
 4. Give Arun `passwords.csv` privately. Add `passwords.csv` and dump folders to `.gitignore` if needed. **Never commit them.**
-5. Spot-check: advisor login → user list → open one plan; then one client Sign in.
+5. Spot-check: advisor login → client list → open one plan; then one client Sign in.
 
 Each client is one transaction (user + profile + that client’s register rows). A bad row rolls back that client only.
 
@@ -99,7 +99,7 @@ Three roles:
 
 | Role | Table | How they sign in | What they can do |
 |---|---|---|---|
-| Super admin | `super_admin` | https://lifemap.finance/super-admin/login | Create/edit **admins**, assign users. **Account** in the top bar: own username and password. Super admin can also reset an advisor’s password via Edit admin. |
+| Super admin | `super_admin` | https://lifemap.finance/super-admin/login | Create/edit **admins**, assign clients. Click a client in the **client register** to open their LifeMap (same plan UI as the advisor). **Account**: own username and password. Can reset an advisor’s password via Edit admin. |
 | Admin (advisor) | `admin` | https://lifemap.finance/admin/login | See **their** clients, open a client’s LifeMap, edit it. **Account**: own username, name, email, password. Can edit a client’s name/email and **reset that client’s password** (only users with their `admin_id`). |
 | User (client) | `"user"` | https://lifemap.finance Sign in (email + password) | Edit their own plan and change their own password on Profile |
 
@@ -138,7 +138,7 @@ Rules:
 
 1. A **client login** is a row in `"user"` (`email` unique, `name`, `password_hash`, `admin_id`).
 2. Almost every plan row needs `user_id` **and** `profile_id`. Create **one** `financial_profile` per user before inserting registers.
-3. `"user".admin_id` must point at the advisor in `admin`. If it is null, that client will **not** show in that advisor’s Admin → user list.
+3. `"user".admin_id` must point at the advisor in `admin`. If it is null, that client will **not** show in that advisor’s Admin → client list.
 4. Passwords are **bcrypt** (cost **12**, `bcryptjs`). Never store plaintext in the database.
 5. Email is the only unique client key the app has. There is no CRM id, PAN, phone, or Aadhaar column.
 
@@ -376,7 +376,7 @@ Use `backend/scripts/bulk-import-clients.js` with the Render **External** Databa
 Dry-run first, then a 1-client test, then the rest. After import, Arun should:
 
 1. Open https://lifemap.finance/admin/login as the advisor  
-2. See the new names in the user register  
+2. See the new names in the client register  
 3. Open one plan (same mockup UI as the client)  
 4. Give that client their email + generated password to try Sign in
 

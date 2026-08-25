@@ -29,7 +29,7 @@ export default function SuperAdminLoginPage() {
   };
 
   return (
-    <LifemapGate title="Super admin sign in" subtitle="Assign admins and move users between them.">
+    <LifemapGate title="Super admin sign in" subtitle="Assign admins and move clients between them.">
       <form onSubmit={handleSubmit} className="stack">
         <div>
           <label htmlFor="sa-user">Username</label>
