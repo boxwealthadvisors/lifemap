@@ -5,9 +5,10 @@ import { Trash2, Edit } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { LifemapAdminShell } from '../components/LifemapChrome';
+import { AccountSettingsModal } from '../components/AccountSettingsModal';
 
 export default function SuperAdminPage() {
-  const { admin, adminLogout, isSuperAdmin } = useAuth();
+  const { admin, setAdmin, adminLogout, isSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const [admins, setAdmins] = useState([]);
   const [users, setUsers] = useState([]);
@@ -15,6 +16,7 @@ export default function SuperAdminPage() {
   const [showCreateAdmin, setShowCreateAdmin] = useState(false);
   const [showEditAdmin, setShowEditAdmin] = useState(null);
   const [showTransferUser, setShowTransferUser] = useState(null);
+  const [showAccount, setShowAccount] = useState(false);
 
   const [adminForm, setAdminForm] = useState({
     username: '',
@@ -146,7 +148,12 @@ export default function SuperAdminPage() {
     <LifemapAdminShell
       title="Admins and users"
       kicker={`Signed in as ${admin?.username || 'Super admin'}`}
-      actions={<button type="button" className="lm-btn" onClick={handleLogout}>Logout</button>}
+      actions={(
+        <span style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="lm-ghost" onClick={() => setShowAccount(true)}>Account</button>
+          <button type="button" className="lm-btn" onClick={handleLogout}>Logout</button>
+        </span>
+      )}
     >
       <div className="lm-card" style={{ marginBottom: 16 }}>
         <div className="lm-reghead">
@@ -232,6 +239,15 @@ export default function SuperAdminPage() {
           </table>
         </div>
       </div>
+
+      {showAccount ? (
+        <AccountSettingsModal
+          role="super_admin"
+          admin={admin}
+          onClose={() => setShowAccount(false)}
+          onSaved={(updated) => setAdmin({ ...admin, ...updated })}
+        />
+      ) : null}
 
       {showCreateAdmin ? (
         <div className="lm-modal-overlay" onClick={() => setShowCreateAdmin(false)}>

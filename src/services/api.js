@@ -526,6 +526,20 @@ class ApiService {
     return this.request('/admin/admin/profile');
   }
 
+  async updateAdminProfile(profileData) {
+    return this.request('/admin/admin/profile', {
+      method: 'PUT',
+      body: profileData,
+    });
+  }
+
+  async updateSuperAdminProfile(profileData) {
+    return this.request('/admin/super-admin/profile', {
+      method: 'PUT',
+      body: profileData,
+    });
+  }
+
   // Super Admin - Admin Management
   async getAdmins() {
     return this.request('/admin/super-admin/admins');
@@ -571,6 +585,13 @@ class ApiService {
   async createUser(userData) {
     return this.request('/admin/admin/users', {
       method: 'POST',
+      body: userData,
+    });
+  }
+
+  async updateUser(userId, userData) {
+    return this.request(`/admin/admin/users/${userId}`, {
+      method: 'PUT',
       body: userData,
     });
   }

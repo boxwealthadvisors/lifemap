@@ -99,9 +99,9 @@ Three roles:
 
 | Role | Table | How they sign in | What they can do |
 |---|---|---|---|
-| Super admin | `super_admin` | https://lifemap.finance/super-admin/login | Create/edit **admins**, assign users |
-| Admin (advisor) | `admin` | https://lifemap.finance/admin/login | See **their** clients, open a client’s LifeMap, edit it |
-| User (client) | `"user"` | https://lifemap.finance Sign in (email + password) | Edit their own plan |
+| Super admin | `super_admin` | https://lifemap.finance/super-admin/login | Create/edit **admins**, assign users. **Account** in the top bar: own username and password. Super admin can also reset an advisor’s password via Edit admin. |
+| Admin (advisor) | `admin` | https://lifemap.finance/admin/login | See **their** clients, open a client’s LifeMap, edit it. **Account**: own username, name, email, password. Can edit a client’s name/email and **reset that client’s password** (only users with their `admin_id`). |
+| User (client) | `"user"` | https://lifemap.finance Sign in (email + password) | Edit their own plan and change their own password on Profile |
 
 Public self-signup is **closed**. `POST /api/register` returns 403. New clients are created by an admin (UI) or by this import (DB/API).
 

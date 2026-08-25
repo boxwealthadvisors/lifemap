@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/api';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Edit } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import Shell from '../components/Shell';
@@ -9,14 +9,17 @@ import MockupHost from '../components/MockupHost';
 import { LifemapAdminShell } from '../components/LifemapChrome';
 import { AdminUserProvider } from '../contexts/AdminUserContext';
 import AdminInsurancePage from './AdminInsurancePage';
+import { AccountSettingsModal, EditUserModal } from '../components/AccountSettingsModal';
 
 export default function AdminPage() {
-  const { admin, adminLogout, isAdmin } = useAuth();
+  const { admin, setAdmin, adminLogout, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showCreateUser, setShowCreateUser] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
+  const [editUser, setEditUser] = useState(null);
   const [activeTab, setActiveTab] = useState('users');
 
   const [userForm, setUserForm] = useState({
@@ -107,7 +110,12 @@ export default function AdminPage() {
     <LifemapAdminShell
       title="Your users"
       kicker={`Signed in as ${admin?.name || admin?.username || 'Admin'}`}
-      actions={<button type="button" className="lm-btn" onClick={handleLogout}>Logout</button>}
+      actions={(
+        <span style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="lm-ghost" onClick={() => setShowAccount(true)}>Account</button>
+          <button type="button" className="lm-btn" onClick={handleLogout}>Logout</button>
+        </span>
+      )}
     >
       <div className="lm-card">
         <div className="lm-reghead">
@@ -146,9 +154,14 @@ export default function AdminPage() {
                   <td>{user.name}</td>
                   <td>{user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}</td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <button type="button" className="lm-iconbtn danger" onClick={() => handleDeleteUser(user.id)} aria-label="Delete user">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button type="button" className="lm-iconbtn" onClick={() => setEditUser(user)} aria-label="Edit user">
+                        <Edit className="h-4 w-4" />
+                      </button>
+                      <button type="button" className="lm-iconbtn danger" onClick={() => handleDeleteUser(user.id)} aria-label="Delete user">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -156,6 +169,26 @@ export default function AdminPage() {
           </table>
         </div>
       </div>
+
+      {showAccount ? (
+        <AccountSettingsModal
+          role="admin"
+          admin={admin}
+          onClose={() => setShowAccount(false)}
+          onSaved={(updated) => setAdmin({ ...admin, ...updated })}
+        />
+      ) : null}
+
+      {editUser ? (
+        <EditUserModal
+          user={editUser}
+          onClose={() => setEditUser(null)}
+          onSaved={(updated) => {
+            setUsers((prev) => prev.map((u) => (u.id === updated.id ? { ...u, ...updated } : u)));
+            if (selectedUser?.id === updated.id) setSelectedUser({ ...selectedUser, ...updated });
+          }}
+        />
+      ) : null}
 
       {showCreateUser ? (
         <div className="lm-modal-overlay" onClick={() => setShowCreateUser(false)}>

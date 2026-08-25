@@ -162,6 +162,152 @@ router.get('/admin/profile', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Advisor updates their own username, name, email, and/or password
+router.put('/admin/profile', authenticateAdmin, [
+  body('username').optional({ values: 'falsy' }).trim().isLength({ min: 3 }),
+  body('name').optional({ values: 'falsy' }).trim(),
+  body('email').optional({ values: 'falsy' }).isEmail().withMessage('Enter a valid email or leave it blank'),
+  body('password').optional({ values: 'falsy' }).isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('current_password').optional({ values: 'falsy' })
+], async (req, res) => {
+  try {
+    if (req.admin.role !== 'admin') {
+      return res.status(403).json({ error: 'Use the super admin account settings for this login' });
+    }
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+    }
+
+    const username = req.body.username ? String(req.body.username).trim() : undefined;
+    const name = req.body.name !== undefined ? (String(req.body.name).trim() || null) : undefined;
+    const email = req.body.email !== undefined ? (String(req.body.email).trim() || null) : undefined;
+    const password = req.body.password || undefined;
+    const currentPassword = req.body.current_password;
+
+    if (password) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Current password is required to set a new password' });
+      }
+      const hashRow = await pool.query('SELECT password_hash FROM admin WHERE id = $1', [req.admin.id]);
+      const ok = await bcrypt.compare(currentPassword, hashRow.rows[0].password_hash);
+      if (!ok) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+    }
+
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (username !== undefined) {
+      const taken = await pool.query('SELECT id FROM admin WHERE username = $1 AND id != $2', [username, req.admin.id]);
+      if (taken.rows.length > 0) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
+      updates.push(`username = $${paramCount++}`);
+      values.push(username);
+    }
+    if (name !== undefined) {
+      updates.push(`name = $${paramCount++}`);
+      values.push(name);
+    }
+    if (email !== undefined) {
+      updates.push(`email = $${paramCount++}`);
+      values.push(email);
+    }
+    if (password) {
+      updates.push(`password_hash = $${paramCount++}`);
+      values.push(await bcrypt.hash(password, 12));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push('updated_at = NOW()');
+    values.push(req.admin.id);
+    const result = await pool.query(
+      `UPDATE admin SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, username, name, email, is_active`,
+      values
+    );
+
+    res.json({
+      message: 'Account updated',
+      admin: { ...result.rows[0], role: 'admin' }
+    });
+  } catch (error) {
+    console.error('Error updating admin profile:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Super admin updates their own username and/or password
+router.put('/super-admin/profile', authenticateSuperAdmin, [
+  body('username').optional({ values: 'falsy' }).trim().isLength({ min: 3 }),
+  body('password').optional({ values: 'falsy' }).isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('current_password').optional({ values: 'falsy' })
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+    }
+
+    const username = req.body.username ? String(req.body.username).trim() : undefined;
+    const password = req.body.password || undefined;
+    const currentPassword = req.body.current_password;
+
+    if (password) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Current password is required to set a new password' });
+      }
+      const hashRow = await pool.query('SELECT password_hash FROM super_admin WHERE id = $1', [req.admin.id]);
+      const ok = await bcrypt.compare(currentPassword, hashRow.rows[0].password_hash);
+      if (!ok) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+    }
+
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (username !== undefined) {
+      const taken = await pool.query('SELECT id FROM super_admin WHERE username = $1 AND id != $2', [username, req.admin.id]);
+      if (taken.rows.length > 0) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
+      updates.push(`username = $${paramCount++}`);
+      values.push(username);
+    }
+    if (password) {
+      updates.push(`password_hash = $${paramCount++}`);
+      values.push(await bcrypt.hash(password, 12));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push('updated_at = NOW()');
+    values.push(req.admin.id);
+    const result = await pool.query(
+      `UPDATE super_admin SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, username`,
+      values
+    );
+
+    res.json({
+      message: 'Account updated',
+      admin: { ...result.rows[0], role: 'super_admin' }
+    });
+  } catch (error) {
+    console.error('Error updating super admin profile:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ==================== SUPER ADMIN - ADMIN MANAGEMENT ====================
 
 // Get all admins (super admin only)
@@ -506,6 +652,82 @@ router.post('/admin/users', authenticateAdmin, [
     });
   } catch (error) {
     console.error('Error creating user:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update a client assigned to this admin (name, email, password reset)
+router.put('/admin/users/:userId', authenticateAdmin, [
+  body('email').optional({ values: 'falsy' }).isEmail(),
+  body('name').optional({ values: 'falsy' }).trim().isLength({ min: 2 }),
+  body('password').optional({ values: 'falsy' }).isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
+], async (req, res) => {
+  try {
+    if (req.admin.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+    }
+
+    const { userId } = req.params;
+    const userCheck = await pool.query(
+      'SELECT id, admin_id FROM "user" WHERE id = $1',
+      [userId]
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (userCheck.rows[0].admin_id !== req.admin.id) {
+      return res.status(403).json({ error: 'Access denied. User is not assigned to you' });
+    }
+
+    const email = req.body.email ? String(req.body.email).trim().toLowerCase() : undefined;
+    const name = req.body.name ? String(req.body.name).trim() : undefined;
+    const password = req.body.password || undefined;
+
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (email !== undefined) {
+      const taken = await pool.query('SELECT id FROM "user" WHERE LOWER(email) = $1 AND id != $2', [email, userId]);
+      if (taken.rows.length > 0) {
+        return res.status(400).json({ error: 'Another user already uses this email' });
+      }
+      updates.push(`email = $${paramCount++}`);
+      values.push(email);
+    }
+    if (name !== undefined) {
+      updates.push(`name = $${paramCount++}`);
+      values.push(name);
+    }
+    if (password) {
+      updates.push(`password_hash = $${paramCount++}`);
+      values.push(await bcrypt.hash(password, 12));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push('updated_at = NOW()');
+    values.push(userId);
+    const result = await pool.query(
+      `UPDATE "user" SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING id, email, name, created_at, updated_at`,
+      values
+    );
+
+    res.json({
+      message: password ? 'User updated. Give them the new password privately.' : 'User updated',
+      user: result.rows[0],
+      password_reset: Boolean(password)
+    });
+  } catch (error) {
+    console.error('Error updating user:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
