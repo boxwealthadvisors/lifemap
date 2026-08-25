@@ -9,6 +9,7 @@ const STATEMENTS = [
   `ALTER TABLE financial_profile ADD COLUMN IF NOT EXISTS equity_growth_rate DECIMAL(8,6) DEFAULT 0.15`,
   `ALTER TABLE financial_profile ADD COLUMN IF NOT EXISTS debt_growth_rate DECIMAL(8,6) DEFAULT 0.07`,
   `ALTER TABLE financial_profile ADD COLUMN IF NOT EXISTS personal_asset_value DECIMAL(15,2) DEFAULT 0`,
+  `ALTER TABLE financial_profile ADD COLUMN IF NOT EXISTS household JSONB DEFAULT '[]'::jsonb`,
   `ALTER TABLE assets ADD COLUMN IF NOT EXISTS category VARCHAR(100)`,
   `ALTER TABLE assets ADD COLUMN IF NOT EXISTS sip_amount DECIMAL(15,2) DEFAULT 0`,
   `ALTER TABLE assets ADD COLUMN IF NOT EXISTS sip_frequency VARCHAR(40) DEFAULT 'Monthly'`,

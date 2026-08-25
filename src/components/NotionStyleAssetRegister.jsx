@@ -14,6 +14,7 @@ import ApiService from '@/services/api'
 import { useLifeSheetStore } from '@/store/enhanced-store'
 import EarmarkingInput from './EarmarkingInput'
 import { CORE_COLUMNS } from '@/constants/columns'
+import { horizonYears } from '@/lib/planLinks'
 
 const NotionStyleAssetRegister = () => {
   const { user, isAuthenticated } = useAuth()
@@ -456,8 +457,9 @@ const NotionStyleAssetRegister = () => {
       // Calculate portfolio series for each year
       const currentYear = new Date().getFullYear();
       const portfolioSeries = {};
+      const years = horizonYears(quickCalcAssumptions.age, quickCalcAssumptions.lifespanYears);
       
-      for (let yearOffset = 0; yearOffset <= 50; yearOffset++) {
+      for (let yearOffset = 0; yearOffset <= years; yearOffset++) {
         const year = currentYear + yearOffset;
         let totalAssets = 0;
         

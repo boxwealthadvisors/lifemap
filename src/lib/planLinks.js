@@ -115,6 +115,22 @@ export function combinedAssets(profile, assetRows) {
   }
 }
 
+export function horizonYears(age, lifespan) {
+  return Math.max(1, Math.round(num(lifespan, 85) - num(age, 32)))
+}
+
+export function parseHousehold(raw) {
+  let list = raw
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list) } catch { return [] }
+  }
+  return Array.isArray(list) ? list : []
+}
+
+export function householdAnnual(list) {
+  return parseHousehold(list).reduce((s, row) => s + num(row.income), 0)
+}
+
 export function combinedWorkUnassigned(profile, workRows) {
   const salary = num(profile?.current_annual_gross_income)
   const itemised = workAnnual(workRows)
@@ -149,7 +165,6 @@ export function publishPlanToStore({
 }) {
   const store = useLifeSheetStore.getState()
   const age = num(profile?.age ?? assumptions?.age, 32)
-  const salary = combinedSalary(profile, work)
   const assetsCombined = combinedAssets(profile, assets)
   const inflation = num(assumptions?.inflationRate ?? profile?.inflation_rate, 0.06)
   const incomeGrowth = num(assumptions?.incomeGrowthRate ?? profile?.income_growth_rate, 0.08)
@@ -159,20 +174,23 @@ export function publishPlanToStore({
   const debtGrowth = num(assumptions?.debtGrowthRate ?? assumptions?.assetDebtGrowthRate ?? profile?.debt_growth_rate, 0.07)
   const tenure = num(profile?.work_tenure_years, 28)
   const lifespan = num(profile?.lifespan_years ?? assumptions?.lifespanYears, 85)
+  const years = horizonYears(age, lifespan)
+  const workTillAge = age + tenure
   const currentYear = new Date().getFullYear()
   const assetRows = asList(assets, 'assets')
   const workRows = asList(work, 'workAssets', 'assets', 'data')
   const expenseRows = asList(expenses, 'expenses')
   const loanRows = asList(loans, 'loans')
+  const household = parseHousehold(profile?.household)
 
   const portfolioSeries = {}
   const incomeSeries = {}
   const expenseSeries = {}
   const emiSeries = {}
   const unassignedAssets = assetsCombined.unassigned
-  const unassignedIncome = unassignedOf(salary, workAnnual(work))
+  const salaryLump = num(profile?.current_annual_gross_income)
 
-  for (let yearOffset = 0; yearOffset <= 50; yearOffset++) {
+  for (let yearOffset = 0; yearOffset <= years; yearOffset++) {
     const year = currentYear + yearOffset
     let portfolio = 0
     assetRows.forEach((asset) => {
@@ -195,18 +213,27 @@ export function publishPlanToStore({
     portfolioSeries[year] = Math.round(portfolio)
 
     let income = 0
+    const at = age + yearOffset
+    if (at < workTillAge) {
+      income += salaryLump * Math.pow(1 + incomeGrowth, yearOffset)
+    }
     workRows.forEach((row) => {
       const endAge = num(row.endAge ?? row.end, 65)
-      const at = age + yearOffset
       if (at <= endAge) {
         const growth = num(row.growthRate ?? row.g, 5)
         const rate = growth > 1 ? growth / 100 : growth
         income += num(row.amount ?? row.amt) * Math.pow(1 + rate, yearOffset)
       }
     })
-    if (unassignedIncome > 0 && yearOffset < tenure) {
-      income += unassignedIncome * Math.pow(1 + incomeGrowth, yearOffset)
-    }
+    household.forEach((row) => {
+      const till = num(row.workTill ?? row.work_till, workTillAge)
+      const amt = num(row.income)
+      if (amt > 0 && at <= till) {
+        const growth = num(row.g ?? row.growth, incomeGrowth * 100)
+        const rate = growth > 1 ? growth / 100 : growth
+        income += amt * Math.pow(1 + rate, yearOffset)
+      }
+    })
     incomeSeries[year] = Math.round(income)
 
     let living = 0
@@ -236,7 +263,7 @@ export function publishPlanToStore({
   store.setDetailEmi(emiSeries)
   store.hydrateMainInputs({
     age,
-    income0: salary,
+    income0: salaryLump + workAnnual(work) + householdAnnual(household),
     workTenureYears: tenure,
     assets0: assetsCombined.financial + assetsCombined.personal,
     expenses0: fpLivingExpenses(expenseRows).reduce((s, e) => s + annualAmount(e), 0),

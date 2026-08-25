@@ -345,12 +345,13 @@ a{color:inherit} button,input,select{font-family:var(--font)}
 .rowhead,.row{display:grid; gap:9px; align-items:center}
 .rowhead{font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--slate); padding-top:14px; font-weight:600}
 .rows{padding-top:10px; display:flex; flex-direction:column; gap:9px}
-.g-loans .rowhead,.g-loans .row{grid-template-columns:1.5fr 1fr 1fr 148px}
-.g-goals .rowhead,.g-goals .row{grid-template-columns:1.5fr 1fr .85fr 148px}
-.g-exp   .rowhead,.g-exp   .row{grid-template-columns:1.9fr 1fr 148px}
+.g-loans .rowhead,.g-loans .row{grid-template-columns:1.5fr 1fr 1fr}
+.g-goals .rowhead,.g-goals .row{grid-template-columns:1.5fr 1fr .85fr}
+.g-exp   .rowhead,.g-exp   .row{grid-template-columns:1.9fr 1fr}
+.g-family .rowhead,.g-family .row{grid-template-columns:1.1fr .9fr .55fr .9fr .55fr .6fr 88px}
 @media(max-width:760px){
-  .g-loans .rowhead,.g-goals .rowhead,.g-exp .rowhead{display:none}
-  .g-loans .row,.g-goals .row,.g-exp .row{grid-template-columns:1fr 1fr}
+  .g-loans .rowhead,.g-goals .rowhead,.g-exp .rowhead,.g-family .rowhead{display:none}
+  .g-loans .row,.g-goals .row,.g-exp .row,.g-family .row{grid-template-columns:1fr 1fr}
 }
 .rowbtns{display:flex; gap:6px}
 .rb{border:1px solid var(--line); background:#fff; border-radius:8px; height:38px; padding:0 12px;
@@ -362,6 +363,7 @@ a{color:inherit} button,input,select{font-family:var(--font)}
 .addrow{margin-top:11px; width:100%; border:1px dashed #c8d5e8; background:#fbfcfe; color:var(--navy);
   border-radius:9px; padding:11px; font-size:14px; font-weight:700; cursor:pointer}
 .addrow:hover{background:#eef3fa; border-color:var(--navy)}
+a.addrow{display:block; text-align:center; text-decoration:none; box-sizing:border-box}
 .rowfoot{font-size:12.5px; color:var(--slate); padding-top:12px; line-height:1.6; max-width:80ch}
 .sliderrow{display:flex; align-items:center; gap:14px; padding:9px 0; flex-wrap:wrap}
 .sliderrow label{width:200px; font-size:14px; flex:none}
@@ -379,6 +381,8 @@ a{color:inherit} button,input,select{font-family:var(--font)}
 .unlocks li{padding:12px 0 12px 16px; border-left:2px solid var(--aqua); font-size:14.5px}
 .unlocks li + li{border-top:1px solid var(--line)}
 .unlocks b{display:block; font-weight:700} .unlocks span{color:var(--muted); font-size:13px}
+.unlocks a{color:var(--navy); text-decoration:none}
+.unlocks a:hover{text-decoration:underline}
 .wallcta{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
 .wallcta small{color:var(--slate); font-size:12.5px}
 .preview{position:relative; border-radius:14px; overflow:hidden; border:1px solid var(--line); background:var(--paper)}
@@ -433,9 +437,8 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
 <div class="tier2wrap" id="tier2wrap">
   <nav class="tier tier2" aria-label="Sections on this page">
     <button class="stab on" type="button" data-go="top">Freedom chart</button>
-    <button class="stab" type="button" data-go="today">Where you stand today</button>
     <button class="stab" type="button" data-go="inputs">Your details</button>
-    <button class="stab" type="button" data-go="register">The next layer</button>
+    <button class="stab" type="button" data-go="register">Start here</button>
   </nav>
 </div>
 
@@ -620,8 +623,20 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
       </div>
     </details>
 
-    <details class="grp" id="g-assets" style="--accent:var(--c-own)">
+    <details class="grp g-family" id="g-family" style="--accent:#7b61c9">
       <summary><span class="gnum">02</span>
+        <span class="gline"><span class="gtitle">Household</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Spouse, children or parents — add anyone whose income belongs in this plan</span></span>
+        <span class="gval num" id="v-family">&mdash;</span><span class="caret">&#9660;</span></summary>
+      <div class="gbody">
+        <div class="rowhead"><span>Name</span><span>Relation</span><span>Age</span><span>Income &#8377;/yr</span><span>Growth %</span><span>Work till</span><span></span></div>
+        <div class="rows" id="rows-family"></div>
+        <button class="addrow" type="button" id="add-family">+ Add a family member</button>
+        <div class="rowfoot" id="family-note">Each person with income grows at their own rate until their working age. Dependants with no income can still be listed so the household is complete.</div>
+      </div>
+    </details>
+
+    <details class="grp" id="g-assets" style="--accent:var(--c-own)">
+      <summary><span class="gnum">03</span>
         <span class="gline"><span class="gtitle">Current assets</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Separate assets that can fund your plan from assets held for personal use</span></span>
         <span class="gval num" id="v-assets">&mdash;</span><span class="caret">&#9660;</span></summary>
       <div class="gbody">
@@ -637,47 +652,48 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
             <div class="hint">Self-use home, vehicle, jewellery and similar assets. Included in net worth, but not used to fund financial freedom.</div>
           </div>
         </div>
+        <a class="addrow" href="lifemap-assets.html">Open Assets to itemise holdings</a>
       </div>
     </details>
 
     <details class="grp g-loans" id="g-loans" style="--accent:var(--c-emi)">
-      <summary><span class="gnum">03</span>
-        <span class="gline"><span class="gtitle">Outstanding loans and EMIs</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">The balance reduces your net worth; the EMI eats your savings until it clears</span></span>
+      <summary><span class="gnum">04</span>
+        <span class="gline"><span class="gtitle">Outstanding loans and EMIs</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Summary from the Loans page — add or edit them there</span></span>
         <span class="gval num" id="v-loans">&mdash;</span><span class="caret">&#9660;</span></summary>
       <div class="gbody">
-        <div class="rowhead"><span>Loan</span><span>Outstanding &#8377;</span><span>Monthly EMI &#8377;</span><span></span></div>
+        <div class="rowhead"><span>Loan</span><span>Outstanding &#8377;</span><span>Monthly EMI &#8377;</span></div>
         <div class="rows" id="rows-loans"></div>
-        <button class="addrow" data-add="loans">+ Add a loan</button>
+        <a class="addrow" href="lifemap-loans.html">Open Loans to add or edit</a>
         <div class="rowfoot" id="loans-note">&nbsp;</div>
       </div>
     </details>
 
     <details class="grp g-goals" id="g-goals" style="--accent:var(--c-goal)">
-      <summary><span class="gnum">04</span>
-        <span class="gline"><span class="gtitle">Life goals</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Cost today and how many years until you need the money</span></span>
+      <summary><span class="gnum">05</span>
+        <span class="gline"><span class="gtitle">Life goals</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Summary from the Goals page — add or edit them there</span></span>
         <span class="gval num" id="v-goals">&mdash;</span><span class="caret">&#9660;</span></summary>
       <div class="gbody">
-        <div class="rowhead"><span>Goal</span><span>Cost today &#8377;</span><span>Need in (yrs)</span><span></span></div>
+        <div class="rowhead"><span>Goal</span><span>Cost today &#8377;</span><span>Need in (yrs)</span></div>
         <div class="rows" id="rows-goals"></div>
-        <button class="addrow" data-add="goals">+ Add a goal</button>
+        <a class="addrow" href="lifemap-goals.html">Open Goals to add or edit</a>
         <div class="rowfoot" id="goals-note">&nbsp;</div>
       </div>
     </details>
 
     <details class="grp g-exp" id="g-spend" style="--accent:var(--c-exp)">
-      <summary><span class="gnum">05</span>
-        <span class="gline"><span class="gtitle">Current annual expenses</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Taken from your Expense register &mdash; edit them there, not as a two-line total here</span></span>
+      <summary><span class="gnum">06</span>
+        <span class="gline"><span class="gtitle">Current annual expenses</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Summary from the Expenses page — add or edit them there</span></span>
         <span class="gval num" id="v-spend">&mdash;</span><span class="caret">&#9660;</span></summary>
       <div class="gbody">
-        <div class="rowhead"><span>Expense</span><span>Per year &#8377;</span><span></span></div>
+        <div class="rowhead"><span>Expense</span><span>Per year &#8377;</span></div>
         <div class="rows" id="rows-exp"></div>
-        <button class="addrow" data-add="exp">+ Add an expense</button>
+        <a class="addrow" href="lifemap-expenses.html">Open Expenses to add or edit</a>
         <div class="rowfoot" id="exp-note">&nbsp;</div>
       </div>
     </details>
 
     <details class="grp" id="g-assume">
-      <summary><span class="gnum">06</span>
+      <summary><span class="gnum">07</span>
         <span class="gline"><span class="gtitle">Assumptions</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">The four figures the whole projection rests on</span></span>
         <span class="gval num" id="v-assume">&mdash;</span><span class="caret">&#9660;</span></summary>
       <div class="gbody" style="padding-top:16px">
@@ -696,14 +712,16 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
   <div class="wrap">
     <div class="wallcard">
       <div>
-        <div class="eyebrow" style="color:var(--navy)">The next layer</div>
-        <h2>You've drawn the outline. Now fill it in.</h2>
-        <p>Your freedom age rests on a handful of rough numbers. Sign in to replace each one with the real detail &mdash; and LifeMap starts answering questions instead of just adding up.</p>
+        <div class="eyebrow" style="color:var(--navy)">Start here</div>
+        <h2>Fill the registers. The chart uses them.</h2>
+        <p>Begin with salary and assumptions on this page, then open each register once. You do not enter the same loans, goals or expenses in two places.</p>
         <ul class="unlocks">
-          <li><b>Asset-by-asset register</b><span>Tag each holding, split investment from personal, set a return per asset class</span></li>
-          <li><b>Goals linked to assets</b><span>See which goal is funded and what each one needs per month</span></li>
-          <li><b>Protection gap</b><span>How much life cover you actually need, against what you already hold</span></li>
-          <li><b>Saved and shareable</b><span>Come back any time; send it to your advisor as a PDF</span></li>
+          <li><a href="lifemap-assets.html"><b>Assets</b></a><span>Tag each holding, set a return, earmark for a goal</span></li>
+          <li><a href="lifemap-work-assets.html"><b>Work assets</b></a><span>Rent, business or bonus — each with its own growth rate</span></li>
+          <li><a href="lifemap-goals.html"><b>Goals</b></a><span>Cost, year, and whether it is funded from assets or income</span></li>
+          <li><a href="lifemap-loans.html"><b>Loans</b></a><span>Outstanding balance and EMI</span></li>
+          <li><a href="lifemap-expenses.html"><b>Expenses</b></a><span>Living costs with their own inflation and life window</span></li>
+          <li><a href="/insurance"><b>Insurance</b></a><span>Cover against what you already hold</span></li>
         </ul>
         <div class="wallcta">
           <a class="btn" href="#signin">Sign in</a>
@@ -731,7 +749,7 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
     <span style="margin-left:auto"><a href="#">Terms</a> &nbsp;&middot;&nbsp; <a href="#">Privacy</a> &nbsp;&middot;&nbsp; <a href="#">Talk to an advisor</a></span>
   </div>
   <div class="disclaimer">
-    LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It assumes salary is your only income and continues only until the working age selected, personal assets are not sold to fund the plan, loan instalments repay the balance without interest, and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
+    LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It uses salary, work-asset streams and household income, each with its own growth rate and end age; personal assets are not sold to fund the plan; loan instalments repay the balance without interest; and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
   </div>
 </footer>
 
@@ -761,6 +779,8 @@ const S = {
     {n:"One trip a year", v:120000, from:32, to:75, inf:7, saved:true},
     {n:"SIPs", v:330000, from:32, to:60, inf:0, saved:true}
   ],
+  work:[],
+  household:[],
   gRet:11, gInf:6, lifeTo:85
 };
 
@@ -784,8 +804,37 @@ function livingSource(){
 }
 
 /* ========================= TODAY'S POSITION ========================= */
+function incomeAt(t, gS){
+  const ageAt = num(S.age) + t;
+  let y = 0;
+  if(ageAt < num(S.workTill)) y += num(S.salary) * Math.pow(1 + gS, t);
+  (S.work || []).forEach(w => {
+    if(num(w.amt) > 0 && ageAt <= num(w.end, 65)){
+      y += num(w.amt) * Math.pow(1 + num(w.g)/100, t);
+    }
+  });
+  (S.household || []).forEach(m => {
+    const till = num(m.workTill, S.workTill);
+    if(num(m.income) > 0 && ageAt <= till){
+      y += num(m.income) * Math.pow(1 + num(m.g, S.gSal)/100, t);
+    }
+  });
+  return y;
+}
+function incomeItemsNow(){
+  const items = [];
+  if(num(S.salary) > 0) items.push({n:"Annual salary", v:num(S.salary),
+    d:"Take-home salary, growing "+S.gSal+"% a year until age "+S.workTill+"."});
+  (S.work || []).forEach((w,i) => { if(num(w.amt) > 0) items.push({
+    n:w.name || ("Income stream "+(i+1)), v:num(w.amt),
+    d:"Grows at "+num(w.g)+"%"+" a year until age "+num(w.end, 65)+"." }); });
+  (S.household || []).forEach((m,i) => { if(num(m.income) > 0) items.push({
+    n:(m.n || "Family member")+" · "+(m.rel || "household"), v:num(m.income),
+    d:"Grows at "+num(m.g, S.gSal)+"% a year until age "+num(m.workTill, S.workTill)+"." }); });
+  return items;
+}
 function current(){
-  const salary  = num(S.salary);
+  const salary  = incomeAt(0, (S.gSal||0)/100);
   const expenses= livingAt(0, 0);
   const emiYear = sum(S.loans,"emi")*12;
   const surplus = salary - expenses - emiYear;
@@ -814,6 +863,7 @@ function livingAt(t, gI){
    The financial-asset pool is projected year by year in nominal terms, then deflated to today's money for display.
    Salary and outflows land at the start of each year, then the remaining pool grows.
    Salary continues until the selected working age, even if financial freedom is reached earlier.
+   Work-asset streams and household incomes use their own growth rates and end ages.
    The required corpus is the present value at each age of every remaining
    expense, EMI and goal, discounted at the expected return and assuming no
    future salary from that age. Therefore, assets >= required corpus means
@@ -840,7 +890,7 @@ function engine(o){
     S.goals.forEach(gl => { if(Math.round(num(gl.yrs)) === t && num(gl.v) > 0){
       g += num(gl.v)*Math.pow(1+gI,t); names.push(gl.n || "Goal"); }});
     goal.push(g); goalNames.push(names);
-    salFull.push(num(S.salary)*Math.pow(1+gS,t));
+    salFull.push(incomeAt(t, gS));
   }
   const cost = t => exp[t] + emi[t] + goal[t];
 
@@ -849,10 +899,10 @@ function engine(o){
   req[N] = cost(N);
   for(let t=N-1;t>=0;t--) req[t] = cost(t) + req[t+1]/(1+gR);
 
-  /* Actual projected pool: salary keeps coming until the selected working age. */
+  /* Actual projected pool: salary, work streams and household income keep arriving on their own schedules. */
   const pool = [num(S.finAssets)];
   for(let t=0;t<N;t++){
-    const sal = t < workStop ? salFull[t] : 0;
+    const sal = salFull[t];
     pool.push((pool[t] + sal - cost(t))*(1+gR));
   }
 
@@ -873,7 +923,7 @@ function engine(o){
 
   const real = (v,t) => v/Math.pow(1+gI,t);
   return {N, ff, req, pool, exp, emi, goal, goalNames, real, workAge, workStop,
-          sal: t => t < workStop ? salFull[t] : 0};
+          sal: t => salFull[t] || 0};
 }
 
 /* ========================= FREEDOM CHART ========================= */
@@ -956,10 +1006,17 @@ function drawFF(){
     s += `<circle cx="${x(E.ff)}" cy="${y(p.assets)}" r="3.5" fill="#fff"/>`;
   }
 
-  const step = Math.max(1, Math.round(E.N/8));
-  pts.forEach(p => { if(p.t % step === 0 || p.t === E.N)
-    s += `<text class="axis" x="${x(p.t)}" y="${H-11}" text-anchor="middle">${p.age}</text>`; });
-  s += `<text class="axis" x="${PL-10}" y="${H-11}" text-anchor="end" fill="#6d84aa">age</text>`;
+  const y0 = new Date().getFullYear();
+  const step = E.N <= 20 ? 2 : 5;
+  const ticks = [];
+  for(let t=0;t<=E.N;t+=step) ticks.push(t);
+  if(ticks[ticks.length-1] !== E.N) ticks.push(E.N);
+  ticks.forEach(t => {
+    const p = pts[t];
+    if(!p) return;
+    s += `<text class="axis" x="${x(p.t)}" y="${H-11}" text-anchor="middle">${y0+p.t}</text>`;
+  });
+  s += `<text class="axis" x="${PL-10}" y="${H-11}" text-anchor="end" fill="#6d84aa">year</text>`;
 
   s += `<g id="hg" style="display:none">
           <line id="hl" y1="${PT}" y2="${y(min)}" stroke="rgba(255,255,255,.45)" stroke-width="1"/>
@@ -969,12 +1026,12 @@ function drawFF(){
 
   svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
   svg.innerHTML = s;
-  CH = {pts, x, y, W, H, PL, PR, N:E.N};
+  CH = {pts, x, y, W, H, PL, PR, N:E.N, y0: new Date().getFullYear()};
   wireHover();
 
-  $("cnote").textContent = "Both lines in today's purchasing power \u00B7 salary continues to age " + E.workAge
-    + " \u00B7 assumes " + S.gRet + "% return, " + S.gInf + "% inflation, " + S.gSal
-    + "% salary growth, planning to age " + S.lifeTo;
+  $("cnote").textContent = "Both lines in today's purchasing power \u00B7 your salary continues to age " + E.workAge
+    + " \u00B7 other income uses its own growth and end age \u00B7 assumes " + S.gRet + "% return, " + S.gInf + "% inflation"
+    + ", planning to age " + S.lifeTo;
 }
 
 function wireHover(){
@@ -999,12 +1056,12 @@ function wireHover(){
     tip.classList.add("on");
     tip.innerHTML =
       `<span class="tst ${statusClass}">${status}</span>
-       <div class="ty">Age ${p.age}</div>
+       <div class="ty">Age ${p.age} \u00B7 ${CH.y0 + p.t}</div>
        <div class="hr"></div>
        <div class="row"><span>Projected financial assets</span><b style="color:var(--green)">${fmt(p.assets)}</b></div>
        <div class="row"><span>Corpus needed</span><b style="color:var(--navy)">${fmt(p.need)}</b></div>
        <div class="hr"></div>
-       <div class="row"><span>Salary</span><b>${fmt(p.sal)}</b></div>
+       <div class="row"><span>Income</span><b>${fmt(p.sal)}</b></div>
        <div class="row"><span>Expenses</span><b>${fmt(p.exp)}</b></div>
        ${p.emi > 0 ? `<div class="row"><span>EMI</span><b>${fmt(p.emi)}</b></div>` : ""}
        ${p.goal > 0 ? `<div class="row"><span>${p.names.join(", ")}</span><b style="color:var(--amber)">${fmt(p.goal)}</b></div>` : ""}`;
@@ -1314,54 +1371,63 @@ const DEFS = {
 function renderRows(key){
   const d = DEFS[key], box = $(d.el);
   if(!d || !box) return;
-  const addBtn = document.querySelector('[data-add="'+key+'"]');
-  if(key === "exp" && hasRegister()){
-    box.innerHTML = "";
-    if(addBtn) addBtn.style.display = "none";
-    livingSource().forEach((r) => {
-      const div = document.createElement("div");
-      div.className = "row";
-      div.innerHTML = `<input class="inp" type="text" value="${r.n||""}" readonly>
-        <input class="inp" type="text" inputmode="decimal" value="${r.v||0}" readonly>`;
-      box.appendChild(div);
-    });
+  const list = key === "exp" ? livingSource() : (S[d.list] || []);
+  box.innerHTML = "";
+  if(!list.length){
+    box.innerHTML = `<div class="rowfoot" style="padding-top:0">Nothing recorded yet.</div>`;
     return;
   }
-  if(key === "exp" && addBtn) addBtn.style.display = "";
-  box.innerHTML = "";
-  S[d.list].forEach((r,idx) => {
+  list.forEach((r) => {
     const div = document.createElement("div");
     div.className = "row";
-    div.innerHTML = d.cols.map(([k,t,ph]) =>
-        `<input class="inp" type="${t==="number"?"text":t}"${t==="number"?' inputmode="decimal"':""} data-k="${k}" placeholder="${ph}" value="${r[k]!==undefined&&r[k]!==null?r[k]:""}">`).join("")
-      + `<span class="rowbtns">
-           <button class="rb save${r.saved?" done":""}" type="button">${r.saved?"Saved":"Save"}</button>
-           <button class="rb del" type="button">Remove</button></span>`;
-    const btnSave = div.querySelector(".save");
-    div.querySelectorAll("input").forEach(inp => {
-      inp.addEventListener("input", e => {
+    div.innerHTML = d.cols.map(([k]) =>
+        `<input class="inp" type="text" value="${r[k]!==undefined&&r[k]!==null?r[k]:""}" readonly>`).join("");
+    box.appendChild(div);
+  });
+}
+function renderFamily(){
+  const box = $("rows-family");
+  if(!box) return;
+  if(!S.household) S.household = [];
+  box.innerHTML = "";
+  const rels = ["Spouse","Child","Parent","Sibling","Other"];
+  S.household.forEach((r,idx) => {
+    const div = document.createElement("div");
+    div.className = "row";
+    div.innerHTML =
+      `<input class="inp" data-k="n" placeholder="Name" value="${r.n||""}">
+       <select class="inp" data-k="rel">${rels.map(v => `<option${(r.rel||"Spouse")===v?" selected":""}>${v}</option>`).join("")}</select>
+       <input class="inp" data-k="age" type="text" inputmode="numeric" value="${r.age||""}" placeholder="Age">
+       <input class="inp" data-k="income" type="text" inputmode="decimal" value="${r.income||0}">
+       <input class="inp" data-k="g" type="text" inputmode="decimal" value="${r.g!=null?r.g:S.gSal}">
+       <input class="inp" data-k="workTill" type="text" inputmode="numeric" value="${r.workTill||S.workTill}">
+       <span class="rowbtns"><button class="rb del" type="button">Remove</button></span>`;
+    div.querySelectorAll("input,select").forEach(inp => {
+      const apply = e => {
         const k = e.target.dataset.k;
-        S[d.list][idx][k] = (k === "n") ? e.target.value : num(e.target.value);
-        S[d.list][idx].saved = false;
-        btnSave.classList.remove("done"); btnSave.textContent = "Save";
+        S.household[idx][k] = (k === "n" || k === "rel") ? e.target.value : num(e.target.value);
         refresh();
-      });
+      };
+      inp.addEventListener("input", apply);
+      inp.addEventListener("change", apply);
     });
-    btnSave.addEventListener("click", () => {
-      S[d.list][idx].saved = true;
-      btnSave.classList.add("done"); btnSave.textContent = "Saved";
-    });
-    div.querySelector(".del").addEventListener("click", () => { S[d.list].splice(idx,1); renderRows(key); refresh(); });
+    div.querySelector(".del").addEventListener("click", () => { S.household.splice(idx,1); renderFamily(); refresh(); });
     box.appendChild(div);
   });
 }
 document.querySelectorAll("[data-add]").forEach(b => {
   b.addEventListener("click", () => {
     const key = b.dataset.add;
+    if(!DEFS[key]) return;
     S[DEFS[key].list].push(key === "goals" ? {n:"",v:0,yrs:5,saved:false} : {n:"",v:0,emi:0,saved:false});
     renderRows(key); refresh();
-    $(DEFS[key].el).lastElementChild.querySelector("input").focus();
   });
+});
+const addFam = $("add-family");
+if(addFam) addFam.addEventListener("click", () => {
+  if(!S.household) S.household = [];
+  S.household.push({n:"", rel:"Spouse", age:S.age, income:0, g:S.gSal, workTill:S.workTill, saved:false});
+  renderFamily(); refresh();
 });
 
 /* ========================= REFRESH ========================= */
@@ -1406,11 +1472,11 @@ function refresh(){
   S.loans.forEach((l,i) => { const a = num(l.emi)*12; if(a > 0) spend.push({
     n:(l.n || "Loan "+(i+1))+" EMI", v:a, c:pick(PAL_DEBT,i),
     d: full(num(l.emi))+" a month. Stops once the balance is repaid." }); });
+  const inItems = incomeItemsNow().map((it,i) => ({...it, c:pick(PAL_HAVE,i)}));
   const surGroups = [
     {n:"Money in", v:c.salary, c:GRP_IN,
-     d:"Your only income on this page, growing "+S.gSal+"% a year.",
-     items: c.salary > 0 ? [{n:"Annual salary", v:c.salary, c:pick(PAL_HAVE,0),
-       d:"Gross salary for the year, before anything is spent."}] : []},
+     d:"Salary, work-asset streams and household income for this year.",
+     items: inItems},
     {n:"Money out", v:c.outgo, c:GRP_OUT,
      d:"Everything that leaves your hands this year: living costs plus loan instalments.",
      items: spend}
@@ -1425,11 +1491,11 @@ function refresh(){
   sv.className = "v num " + (c.surplus >= 0 ? "pos" : "neg");
   const keptPc = c.salary > 0 ? Math.round((1-c.outgo/c.salary)*100) : 0;
   $("sur-cap").textContent = c.surplus >= 0
-    ? keptPc+"% of your salary is still yours"
+    ? keptPc+"% of your income is still yours"
     : "you spend "+fmt(c.outgo-c.salary)+" more than you earn";
   $("sur-sub").textContent = c.surplus >= 0
-    ? "How this year's salary of "+fmt(c.salary)+" is used up"
-    : "Your outgo of "+fmt(c.outgo)+" exceeds your salary";
+    ? "How this year's income of "+fmt(c.salary)+" is used up"
+    : "Your outgo of "+fmt(c.outgo)+" exceeds your income";
   $("pop-sur").textContent = full(c.salary)+" \u2212 "+full(c.expenses)+" \u2212 "+full(c.emiYear)+" = "+full(c.surplus);
 
   /* --- chart 2: what you own against what you owe, net worth in the middle --- */
@@ -1475,12 +1541,17 @@ function refresh(){
   else { band="Strong. You are building faster than most."; tone=""; col="#0d8a78"; }
   rv.className = "big num "+tone;
   rb.style.background = col;
-  $("ratio-verdict").textContent = c.salary > 0 ? band : "Enter your salary to see this.";
+  $("ratio-verdict").textContent = c.salary > 0 ? band : "Enter your salary or other income to see this.";
   $("pop-ratio").textContent = c.salary > 0
     ? full(c.surplus)+" \u00F7 "+full(c.salary)+" = "+c.ratio.toFixed(1)+"%" : "";
 
   /* --- section summaries --- */
   $("v-profile").innerHTML = fmt(S.salary)+"<small>a year, +"+S.gSal+"% · working to age "+S.workTill+"</small>";
+  const famInc = (S.household || []).reduce((s,m) => s + num(m.income), 0);
+  const famN = (S.household || []).length;
+  if($("v-family")) $("v-family").innerHTML = famN
+    ? fmt(famInc)+"<small>"+famN+(famN===1?" person":" people")+(famInc>0?" with income":"")+"</small>"
+    : "None added";
   $("v-assets").innerHTML  = fmt(c.assets)+"<small>"+fmt(c.finAssets)+" financial · "+fmt(c.personalAssets)+" personal</small>";
   $("v-loans").innerHTML   = fmt(c.owed)+"<small>"+fmt(c.emiYear)+" of EMI a year</small>";
   const fvGoals = S.goals.reduce((t,g) => t + num(g.v)*Math.pow(1+S.gInf/100, Math.round(num(g.yrs))), 0);
@@ -1563,6 +1634,7 @@ $("i-life").addEventListener("input",  e => {
 let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawFF, 120); });
 
 ["loans","goals","exp"].forEach(renderRows);
+renderFamily();
 $("i-work-age").min = S.age;
 $("i-work-age").max = S.lifeTo;
 refresh();
@@ -1656,6 +1728,11 @@ refresh();
         if (S.goals) replaceList(S.goals, []);
         if (S.exp) replaceList(S.exp, []);
         if (S.expRegister) replaceList(S.expRegister, []);
+        if (S.work) replaceList(S.work, []);
+        if (S.household) replaceList(S.household, []);
+        if (typeof renderFamily === "function") renderFamily();
+        var lock = document.querySelector(".lockover");
+        if (lock) lock.style.display = "none";
       }
       if (typeof ROWS !== "undefined") replaceList(ROWS, []);
       if (PAGE === "loans" && typeof PLAN !== "undefined") replaceList(PLAN, []);
@@ -1666,11 +1743,11 @@ refresh();
   function getState(){
     try {
       if (PAGE === "fp") {
-        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
+        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
       }
       if (PAGE === "assets") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, MODE: MODE, HZ: HZ, GOALS: (typeof GOALS !== "undefined" ? GOALS.slice() : []) };
       if (PAGE === "work") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, AGE: AGE };
-      if (PAGE === "goals") return { ROWS: ROWS.slice(), AGE: AGE, RET: RET, BASIS: BASIS, ASSETS: (typeof ASSETS !== "undefined" ? ASSETS.slice() : []) };
+      if (PAGE === "goals") return { ROWS: ROWS.slice(), AGE: AGE, RET: RET, BASIS: BASIS, ASSETS: (typeof ASSETS !== "undefined" ? ASSETS.slice() : []), INCOMES: (typeof INCOMES !== "undefined" ? INCOMES.slice() : []) };
       if (PAGE === "loans") return { ROWS: ROWS.slice(), PLAN: PLAN.slice(), VIEW: VIEW };
       if (PAGE === "expenses") return { ROWS: ROWS.slice(), AGE: AGE, LIFE: LIFE, GINF: GINF, BASIS: BASIS, MODE: MODE, SOURCES: LM_SOURCES.slice() };
     } catch (e) { console.error(e); }
@@ -1690,6 +1767,15 @@ refresh();
       if (!S.expRegister) S.expRegister = [];
       replaceList(S.expRegister, src.expRegister);
     }
+    if (src.work) {
+      if (!S.work) S.work = [];
+      replaceList(S.work, src.work);
+    }
+    if (src.household) {
+      if (!S.household) S.household = [];
+      replaceList(S.household, src.household);
+    }
+    if (typeof renderFamily === "function") renderFamily();
     var set = function(id, val){ var el = $(id); if (el) el.value = val; };
     var setTxt = function(id, val){ var el = $(id); if (el) el.textContent = val; };
     set("i-age", S.age);
@@ -1748,6 +1834,7 @@ refresh();
         }
         if (typeof st.RET === "number") { RET = st.RET; var r=$("i-ret"); if(r) r.value=RET; }
         if (st.ASSETS) { try { ASSETS = st.ASSETS; } catch(e) {} }
+        if (st.INCOMES) { try { INCOMES = st.INCOMES; } catch(e) {} }
         if (st.BASIS) BASIS = st.BASIS;
         refresh();
         return;
@@ -1898,6 +1985,34 @@ refresh();
       setTimeout(function(){ post(delBtn ? "row-delete" : "row-save", getState()); }, 30);
     }
   }, true);
+
+  var rowSaveTimer = null;
+  function queueRowSave(){
+    clearTimeout(rowSaveTimer);
+    rowSaveTimer = setTimeout(function(){ post("row-save", getState()); }, 500);
+  }
+  function isPlanField(el){
+    if (!el || !el.closest) return false;
+    if (el.closest(".earpop")) return false;
+    if (el.readOnly || el.disabled) return false;
+    if (el.id === "search") return false;
+    if (el.classList && (el.classList.contains("cell") || el.classList.contains("inp"))) return true;
+    if (el.hasAttribute && el.hasAttribute("data-k")) return true;
+    if (el.tagName === "SELECT" || el.tagName === "TEXTAREA") return true;
+    if (el.tagName === "INPUT") return true;
+    return false;
+  }
+  document.addEventListener("input", function(e){
+    if (isPlanField(e.target)) queueRowSave();
+  });
+  document.addEventListener("change", function(e){
+    if (isPlanField(e.target)) queueRowSave();
+  });
+  document.addEventListener("focusout", function(e){
+    if (!isPlanField(e.target)) return;
+    clearTimeout(rowSaveTimer);
+    post("row-save", getState());
+  });
 
   function snapNumericCaret(el){
     if (!el || el.tagName !== "INPUT" || el.readOnly || el.disabled) return;

@@ -1576,6 +1576,11 @@ document.querySelectorAll(".pmore").forEach(btn => {
         if (S.goals) replaceList(S.goals, []);
         if (S.exp) replaceList(S.exp, []);
         if (S.expRegister) replaceList(S.expRegister, []);
+        if (S.work) replaceList(S.work, []);
+        if (S.household) replaceList(S.household, []);
+        if (typeof renderFamily === "function") renderFamily();
+        var lock = document.querySelector(".lockover");
+        if (lock) lock.style.display = "none";
       }
       if (typeof ROWS !== "undefined") replaceList(ROWS, []);
       if (PAGE === "loans" && typeof PLAN !== "undefined") replaceList(PLAN, []);
@@ -1586,11 +1591,11 @@ document.querySelectorAll(".pmore").forEach(btn => {
   function getState(){
     try {
       if (PAGE === "fp") {
-        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
+        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
       }
       if (PAGE === "assets") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, MODE: MODE, HZ: HZ, GOALS: (typeof GOALS !== "undefined" ? GOALS.slice() : []) };
       if (PAGE === "work") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, AGE: AGE };
-      if (PAGE === "goals") return { ROWS: ROWS.slice(), AGE: AGE, RET: RET, BASIS: BASIS, ASSETS: (typeof ASSETS !== "undefined" ? ASSETS.slice() : []) };
+      if (PAGE === "goals") return { ROWS: ROWS.slice(), AGE: AGE, RET: RET, BASIS: BASIS, ASSETS: (typeof ASSETS !== "undefined" ? ASSETS.slice() : []), INCOMES: (typeof INCOMES !== "undefined" ? INCOMES.slice() : []) };
       if (PAGE === "loans") return { ROWS: ROWS.slice(), PLAN: PLAN.slice(), VIEW: VIEW };
       if (PAGE === "expenses") return { ROWS: ROWS.slice(), AGE: AGE, LIFE: LIFE, GINF: GINF, BASIS: BASIS, MODE: MODE, SOURCES: LM_SOURCES.slice() };
     } catch (e) { console.error(e); }
@@ -1610,6 +1615,15 @@ document.querySelectorAll(".pmore").forEach(btn => {
       if (!S.expRegister) S.expRegister = [];
       replaceList(S.expRegister, src.expRegister);
     }
+    if (src.work) {
+      if (!S.work) S.work = [];
+      replaceList(S.work, src.work);
+    }
+    if (src.household) {
+      if (!S.household) S.household = [];
+      replaceList(S.household, src.household);
+    }
+    if (typeof renderFamily === "function") renderFamily();
     var set = function(id, val){ var el = $(id); if (el) el.value = val; };
     var setTxt = function(id, val){ var el = $(id); if (el) el.textContent = val; };
     set("i-age", S.age);
@@ -1668,6 +1682,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
         }
         if (typeof st.RET === "number") { RET = st.RET; var r=$("i-ret"); if(r) r.value=RET; }
         if (st.ASSETS) { try { ASSETS = st.ASSETS; } catch(e) {} }
+        if (st.INCOMES) { try { INCOMES = st.INCOMES; } catch(e) {} }
         if (st.BASIS) BASIS = st.BASIS;
         refresh();
         return;
@@ -1818,6 +1833,34 @@ document.querySelectorAll(".pmore").forEach(btn => {
       setTimeout(function(){ post(delBtn ? "row-delete" : "row-save", getState()); }, 30);
     }
   }, true);
+
+  var rowSaveTimer = null;
+  function queueRowSave(){
+    clearTimeout(rowSaveTimer);
+    rowSaveTimer = setTimeout(function(){ post("row-save", getState()); }, 500);
+  }
+  function isPlanField(el){
+    if (!el || !el.closest) return false;
+    if (el.closest(".earpop")) return false;
+    if (el.readOnly || el.disabled) return false;
+    if (el.id === "search") return false;
+    if (el.classList && (el.classList.contains("cell") || el.classList.contains("inp"))) return true;
+    if (el.hasAttribute && el.hasAttribute("data-k")) return true;
+    if (el.tagName === "SELECT" || el.tagName === "TEXTAREA") return true;
+    if (el.tagName === "INPUT") return true;
+    return false;
+  }
+  document.addEventListener("input", function(e){
+    if (isPlanField(e.target)) queueRowSave();
+  });
+  document.addEventListener("change", function(e){
+    if (isPlanField(e.target)) queueRowSave();
+  });
+  document.addEventListener("focusout", function(e){
+    if (!isPlanField(e.target)) return;
+    clearTimeout(rowSaveTimer);
+    post("row-save", getState());
+  });
 
   function snapNumericCaret(el){
     if (!el || el.tagName !== "INPUT" || el.readOnly || el.disabled) return;

@@ -344,8 +344,9 @@ td.rt{text-align:right}
 .nfold.open{opacity:1}
 .nfold .foot{border-top:0}
 
-.earcell{min-width:176px; max-width:240px; border:1px solid transparent; border-radius:8px; padding:7px 10px;
+.earcell{min-width:148px; max-width:220px; border:1px solid transparent; border-radius:8px; padding:7px 10px;
   cursor:pointer; text-align:left; background:transparent; font:inherit; color:var(--ink); display:block; width:100%}
+.earcell .k{display:block; font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--slate); font-weight:700; margin-bottom:4px}
 .earcell:hover{background:var(--paper)}
 .earcell .ph{color:var(--muted); font-weight:600; font-size:13px}
 .earcell .chips{display:flex; flex-wrap:wrap; gap:4px}
@@ -486,7 +487,8 @@ td.rt{text-align:right}
             <th style="text-align:right">Inflation %</th>
             <th style="text-align:right">Cost on arrival</th>
             <th style="text-align:right">Worth today</th>
-            <th>Funded from</th>
+            <th>From assets</th>
+            <th>From income</th>
             <th>Notes</th>
             <th style="text-align:right">Actions</th>
           </tr>
@@ -562,6 +564,7 @@ let ROWS = [
 let BASIS = "future", SEARCH = "", FILTER = "";
 let AGE = 32, RET = 11;
 let ASSETS = [];
+let INCOMES = [];
 
 /* ================= HELPERS ================= */
 const $ = id => document.getElementById(id);
@@ -923,7 +926,7 @@ function openEarmark(btn, row, key, catalog, title, cap100, dirty){
         <input id="ear-pct" type="number" min="1" max="${cap100?left:100}" placeholder="%">
         <button type="button" class="rb save" id="ear-add">Add</button>
       </div>
-      <div class="earhint">${cap100 ? left.toFixed(0)+"% remaining · cannot exceed 100% of this holding." : "Each link is a share of that holding set aside for this goal."}</div>
+      <div class="earhint">${cap100 ? left.toFixed(0)+"% remaining · cannot exceed 100% of this holding." : (key === "incomeLinks" ? "Each link is a share of that income stream set aside for this goal." : "Each link is a share of that holding set aside for this goal.")}</div>
       <div class="earacts"><button type="button" class="rb save" id="ear-done">Done</button></div>`;
     EARPOP.querySelectorAll("input[data-i]").forEach(inp => {
       inp.addEventListener("input", () => {
@@ -1017,7 +1020,8 @@ function drawTable(){
           ? `<span class="badrow">age has passed</span>`
           : `<span class="proj" style="color:var(--amber)">${fmt(futureTotal(g))}<small>at age ${g.at}${sp>1?" to "+lastAge(g):""} \u00B7 ${(todayTotal(g)?futureTotal(g)/todayTotal(g):0).toFixed(1)}\u00D7</small></span>`}</td>
       <td class="rt" data-proj="pv"><span class="proj">${fmt(pvTotal(g))}<small>set aside now at ${RET}%</small></span></td>
-      <td><button type="button" class="earcell" data-ear="1">${earmarkChips(g.links)}</button></td>
+      <td><button type="button" class="earcell" data-ear="assets"><span class="k">Assets</span>${earmarkChips(g.links)}</button></td>
+      <td><button type="button" class="earcell" data-ear="income"><span class="k">Income</span>${earmarkChips(g.incomeLinks)}</button></td>
       <td><input class="cell" data-k="notes" value="${esc(g.notes)}" placeholder="Click to add" style="min-width:160px"></td>
       <td><span class="acts">
         <button class="rb save${g.saved?" done":""}" type="button">${g.saved?"Saved":"Save"}</button>
@@ -1035,8 +1039,10 @@ function drawTable(){
         refresh(false);
       });
     });
-    const earBtn = tr.querySelector("[data-ear]");
+    const earBtn = tr.querySelector("[data-ear='assets']");
     if(earBtn) earBtn.addEventListener("click", () => openEarmark(earBtn, g, "links", ASSETS, "Funded from assets", false, dirty));
+    const incBtn = tr.querySelector("[data-ear='income']");
+    if(incBtn) incBtn.addEventListener("click", () => openEarmark(incBtn, g, "incomeLinks", INCOMES, "Funded from income", false, dirty));
     /* choosing a type seeds both the inflation rate and how fixed it usually is */
     tr.querySelector('[data-k="cat"]').addEventListener("click", e => {
       ddToggle(e.currentTarget, CATS.map(c => ({n:c.n, c:c.c, rt:c.inf+"%"})), g.cat, v => {
@@ -1168,7 +1174,7 @@ $("i-ret").addEventListener("input", e => {
 
 const addGoal = () => {
   ROWS.push({id:"temp_"+Date.now(), name:"", cat:"Other", flex:catOf("Other").flex, cost:0,
-             at:Math.min(99, AGE+5), span:1, inf:catOf("Other").inf, notes:"", links:[], saved:false});
+             at:Math.min(99, AGE+5), span:1, inf:catOf("Other").inf, notes:"", links:[], incomeLinks:[], saved:false});
   SEARCH = ""; FILTER = ""; $("search").value = "";
   $("filter").querySelector(".lbl").textContent = "All goals";
   refresh();
@@ -1192,11 +1198,11 @@ $("btn-reset").addEventListener("click", () => {
   drawTable();
 });
 $("btn-csv").addEventListener("click", () => {
-  const head = ["Goal","Type","How fixed","Cost today","Needed at age","Spread over years","Inflation %","Cost on arrival","Worth today","Funded from"];
+  const head = ["Goal","Type","How fixed","Cost today","Needed at age","Spread over years","Inflation %","Cost on arrival","Worth today","From assets","From income"];
   const q = v => `"${String(v==null?"":v).replace(/"/g,'""')}"`;
   const csv = [head.map(q).join(",")].concat(
     ROWS.map(g => [g.name,g.cat,g.flex,g.cost,g.at,spanOf(g),g.inf,
-                   Math.round(futureTotal(g)),Math.round(pvTotal(g)),(g.links||[]).map(e => e.name+" "+e.pct+"%").join("; ")].map(q).join(","))
+                   Math.round(futureTotal(g)),Math.round(pvTotal(g)),(g.links||[]).map(e => e.name+" "+e.pct+"%").join("; "),(g.incomeLinks||[]).map(e => e.name+" "+e.pct+"%").join("; ")].map(q).join(","))
   ).join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));

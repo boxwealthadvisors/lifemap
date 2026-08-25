@@ -10,6 +10,7 @@ import ApiService from '../services/api';
 import UnifiedChart from '@/components/UnifiedChart.jsx';
 import PageHeader from '@/components/PageHeader.jsx';
 import PagePager from '@/components/PagePager.jsx';
+import { horizonYears } from '../lib/planLinks';
 
 const formatCurrency = (value) => {
   if (value === null || value === undefined || isNaN(value)) return '₹0';
@@ -101,7 +102,8 @@ export default function WorkAssetsPage() {
       const unassignedAnnualIncome = Math.max(0, fpAnnualIncome - detailedWorkAssetsAnnualTotal);
       
       // For each year, calculate total work income
-      for (let yearOffset = 0; yearOffset <= 50; yearOffset++) {
+      const years = horizonYears(lifeSheet.age, lifeSheet.lifespanYears);
+      for (let yearOffset = 0; yearOffset <= years; yearOffset++) {
         const year = currentYear + yearOffset;
         let totalIncome = 0;
         

@@ -3,7 +3,6 @@ import {
   annualAmount,
   asList,
   combinedAssets,
-  combinedSalary,
   combinedWorkUnassigned,
   floorLump,
   fpEditableExpenses,
@@ -11,7 +10,7 @@ import {
   unassignedOf,
   FREQ_PER_YEAR,
   num,
-  publishPlanToStore,
+  parseHousehold,
   workAnnual,
 } from './planLinks'
 
@@ -31,7 +30,7 @@ export function mockupSrc(page) {
 export function emptyMockupState(page) {
   if (page === 'assets') return { ROWS: [], UNASSIGNED: 0, GOALS: [] }
   if (page === 'work') return { ROWS: [], UNASSIGNED: 0 }
-  if (page === 'goals') return { ROWS: [], ASSETS: [] }
+  if (page === 'goals') return { ROWS: [], ASSETS: [], INCOMES: [] }
   if (page === 'loans') return { ROWS: [], PLAN: [] }
   if (page === 'expenses') return { ROWS: [], SOURCES: [] }
   if (page === 'fp') {
@@ -50,6 +49,8 @@ export function emptyMockupState(page) {
         gRet: 12,
         gInf: 6,
         lifeTo: 90,
+        work: [],
+        household: [],
       },
     }
   }
@@ -283,7 +284,18 @@ export async function loadMockupState(page, userId, options = {}) {
       api.getWorkAssets().catch(() => []),
     ])
     const assetsCombined = combinedAssets(profile, assetsRes)
-    const salary = combinedSalary(profile, workRes)
+    const salary = num(profile?.current_annual_gross_income)
+    const workList = asList(workRes, 'workAssets', 'assets', 'data')
+    const household = parseHousehold(profile?.household).map((m, i) => ({
+      id: m.id || `hh-${i}`,
+      n: m.n || m.name || '',
+      rel: m.rel || m.relation || 'Spouse',
+      age: num(m.age, age),
+      income: num(m.income),
+      g: asPct(m.g ?? m.growth, asPct(assumptions.incomeGrowthRate, 8)),
+      workTill: num(m.workTill ?? m.work_till, age + num(profile?.work_tenure_years, 28)),
+      saved: true,
+    }))
 
     return {
       S: {
@@ -315,6 +327,14 @@ export async function loadMockupState(page, userId, options = {}) {
         gRet: asPct(assumptions.assetGrowthRate, 11),
         gInf: asPct(assumptions.inflationRate, 6),
         lifeTo: assumptions.lifespanYears || 85,
+        work: workList.map((r, i) => ({
+          id: r.id,
+          name: r.stream || r.name || `Income ${i + 1}`,
+          amt: num(r.amount ?? r.amt),
+          g: asPct(r.growthRate ?? r.g, 5),
+          end: num(r.endAge ?? r.end, 65),
+        })),
+        household,
       },
     }
   }
@@ -380,9 +400,10 @@ export async function loadMockupState(page, userId, options = {}) {
   }
 
   if (page === 'goals') {
-    const [res, assetsRes] = await Promise.all([
+    const [res, assetsRes, workRes] = await Promise.all([
       api.getFinancialGoals().catch(() => ({})),
       api.getFinancialAssets().catch(() => ({})),
+      api.getWorkAssets().catch(() => []),
     ])
     const lm = (g) => g.custom_data?.lifemap || {}
     const ROWS = asList(res, 'goals').map((g) => {
@@ -404,7 +425,28 @@ export async function loadMockupState(page, userId, options = {}) {
           name: a.assetName || a.name || '',
           pct: num(a.percent ?? a.pct),
         })),
+        incomeLinks: (g.custom_data?.linkedIncomes || extra.linkedIncomes || []).map((a) => ({
+          id: a.incomeId || a.id,
+          name: a.incomeName || a.name || '',
+          pct: num(a.percent ?? a.pct),
+        })),
         saved: true,
+      }
+    })
+    const INCOMES = []
+    if (num(profile?.current_annual_gross_income) > 0) {
+      INCOMES.push({ id: 'salary', name: 'Your salary' })
+    }
+    asList(workRes, 'workAssets', 'assets', 'data').forEach((r) => {
+      INCOMES.push({
+        id: r.id,
+        name: r.stream || r.name || 'Income stream',
+      })
+    })
+    parseHousehold(profile?.household).forEach((m, i) => {
+      const name = m.n || m.name || `Family member ${i + 1}`
+      if (num(m.income) > 0) {
+        INCOMES.push({ id: m.id || `hh-${i}`, name: `${name} · ${m.rel || 'family'}` })
       }
     })
     return {
@@ -417,6 +459,7 @@ export async function loadMockupState(page, userId, options = {}) {
           id: a.id,
           name: a.name || 'Asset',
         })),
+      INCOMES,
     }
   }
 
@@ -528,6 +571,16 @@ function asGoalEarmarks(list) {
     .filter((e) => e.goalId && e.percent > 0)
 }
 
+function asLinkedIncomes(list) {
+  return (list || [])
+    .map((e) => ({
+      incomeId: e.id || e.incomeId,
+      incomeName: e.name || e.incomeName || '',
+      percent: num(e.pct ?? e.percent),
+    }))
+    .filter((e) => e.incomeId && e.percent > 0)
+}
+
 function asLinkedAssets(list) {
   return (list || [])
     .map((e) => ({
@@ -610,6 +663,15 @@ export async function saveMockupState(page, userId, state, options = {}) {
       income_growth_rate: asRate(S.gSal, 0.08),
       asset_growth_rate: asRate(S.gRet, 0.11),
       inflation_rate: asRate(S.gInf, 0.06),
+      household: (S.household || []).map((m, i) => ({
+        id: m.id || `hh-${i}`,
+        n: m.n || '',
+        rel: m.rel || 'Spouse',
+        age: num(m.age),
+        income: num(m.income),
+        g: num(m.g, S.gSal),
+        workTill: num(m.workTill, S.workTill),
+      })),
     }
     writeAssumptions({
       inflationRate: payload.inflation_rate,
@@ -619,49 +681,6 @@ export async function saveMockupState(page, userId, state, options = {}) {
       age: payload.age,
     })
     await upsertProfile(api, payload)
-
-    const [loansRes, goalsRes] = await Promise.all([
-      api.getFinancialLoans().catch(() => ({})),
-      api.getFinancialGoals().catch(() => ({})),
-    ])
-
-    await syncCollection({
-      existing: asList(loansRes, 'loans'),
-      next: S.loans || [],
-      create: (body) => api.createFinancialLoan(body),
-      update: (id, body) => api.updateFinancialLoan(id, body),
-      remove: (id) => api.deleteFinancialLoan(id),
-      payload: (row, prior) => ({
-        name: row.n || 'Loan',
-        lender: prior?.lender || prior?.provider || row.n || 'Lender',
-        type: prior?.type || 'Other',
-        principal_outstanding: num(row.v),
-        emi: num(row.emi),
-        rate: num(prior?.rate ?? prior?.interestRate, 0),
-        frequency: prior?.frequency || 'Monthly',
-        notes: prior?.notes || '',
-      }),
-    })
-
-    await syncCollection({
-      existing: asList(goalsRes, 'goals'),
-      next: S.goals || [],
-      create: (body) => api.createFinancialGoal(body),
-      update: (id, body) => api.updateFinancialGoal(id, body),
-      remove: (id) => api.deleteFinancialGoal(id),
-      payload: (row, prior) => ({
-        name: row.n || 'Goal',
-        description: row.n || 'Goal',
-        target_amount: num(row.v),
-        target_year: thisYear() + Math.max(0, num(row.yrs, 5)),
-        category: prior?.category || 'Other',
-        flexibility: prior?.flexibility || 'Committed',
-        span_years: prior?.span_years ?? 1,
-        inflation_pct: prior?.inflation_pct ?? 6,
-        notes: prior?.notes || '',
-        custom_data: prior?.custom_data,
-      }),
-    })
     return
   }
 
@@ -738,14 +757,11 @@ export async function saveMockupState(page, userId, state, options = {}) {
       const current = profileRes?.profile
       const patch = {}
       if (state.AGE) patch.age = num(state.AGE)
-      const streams = workAnnual(state.ROWS)
-      if (streams > 0) {
-        patch.current_annual_gross_income = floorLump(current?.current_annual_gross_income, streams)
-      }
       if (Object.keys(patch).length) {
         await upsertProfile(api, patch).catch(() => {})
       }
-      const salary = num(patch.current_annual_gross_income ?? current?.current_annual_gross_income)
+      const salary = num(current?.current_annual_gross_income)
+      const streams = workAnnual(state.ROWS)
       const tenure = Math.max(1, num(current?.work_tenure_years, 28))
       state.UNASSIGNED = unassignedOf(salary, streams) * tenure
     }
@@ -784,6 +800,7 @@ export async function saveMockupState(page, userId, state, options = {}) {
             at: row.at,
           },
           linkedAssets: asLinkedAssets(row.links),
+          linkedIncomes: asLinkedIncomes(row.incomeLinks),
         },
       }),
     })

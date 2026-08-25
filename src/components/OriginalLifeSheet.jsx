@@ -14,6 +14,7 @@ import { useChart } from '../contexts/ChartContext'
 import { useLifeSheetStore } from '../store/enhanced-store'
 import AuthModal from './AuthModal'
 import ApiService from '../services/api'
+import { horizonYears } from '../lib/planLinks'
 import '../styles/professional-theme.css'
 
 export default function OriginalLifeSheet() {
@@ -289,8 +290,9 @@ export default function OriginalLifeSheet() {
       // Calculate portfolio series for each year
       const currentYear = new Date().getFullYear();
       const portfolioSeries = {};
+      const years = horizonYears(formData?.age, formData?.lifespanYears);
       
-      for (let yearOffset = 0; yearOffset <= 50; yearOffset++) {
+      for (let yearOffset = 0; yearOffset <= years; yearOffset++) {
         const year = currentYear + yearOffset;
         let totalAssets = 0;
         

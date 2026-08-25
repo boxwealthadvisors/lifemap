@@ -173,14 +173,18 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       }
       if (data.type === 'navigate' && data.payload?.path) {
         const path = data.payload.path
+        const snapshot = owned && hydratedRef.current ? (api()?.getState() || null) : null
+        const leaving = page
+        const id = effectiveUserId
         const go = () => {
           if (onNavigate) onNavigate(path)
           else navigate(path)
         }
-        if (owned && hydratedRef.current) {
-          persist(null, true).finally(go)
-        } else {
-          go()
+        go()
+        if (snapshot && id) {
+          saveMockupState(leaving, id, snapshot, syncOpts).catch((error) => {
+            console.error('Failed to save before leaving page', error)
+          })
         }
         return
       }
@@ -236,6 +240,9 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
 
   return (
     <div className={`lm-mockup-host${isAdminMode ? ' is-admin' : ''}`}>
+      {planReady ? null : (
+        <div className="lm-mockup-loading" role="status">Loading your plan…</div>
+      )}
       <iframe
         key={src}
         ref={iframeRef}

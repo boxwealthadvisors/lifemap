@@ -10,6 +10,7 @@ import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import PageHeader from '@/components/PageHeader.jsx'
 import PagePager from '@/components/PagePager.jsx'
+import { horizonYears } from '../lib/planLinks'
 
 const formatCurrency = (value) => {
   if (value === null || value === undefined || isNaN(value)) return '₹0';
@@ -74,6 +75,8 @@ export default function LoansPage() {
     try {
       const currentYear = new Date().getFullYear();
       const emiSeries = {};
+      const assumptions = JSON.parse(localStorage.getItem('quickCalcAssumptions') || '{}');
+      const years = horizonYears(assumptions.age, assumptions.lifespanYears);
       
       // Calculate current detailed loans total outstanding
       const detailedLoansTotal = loansData.reduce((sum, loan) => sum + (parseFloat(loan.amount) || 0), 0);
@@ -96,7 +99,7 @@ export default function LoansPage() {
       }
       
       // For each year, calculate total EMI payments
-      for (let yearOffset = 0; yearOffset <= 50; yearOffset++) {
+      for (let yearOffset = 0; yearOffset <= years; yearOffset++) {
         const year = currentYear + yearOffset;
         let totalEmi = 0;
         

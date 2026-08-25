@@ -163,7 +163,8 @@ router.post('/profile', [
   body('inflation_rate').optional().isFloat({ min: 0, max: 1 }),
   body('equity_growth_rate').optional().isFloat({ min: 0, max: 1 }),
   body('debt_growth_rate').optional().isFloat({ min: 0, max: 1 }),
-  body('personal_asset_value').optional().isFloat({ min: 0 })
+  body('personal_asset_value').optional().isFloat({ min: 0 }),
+  body('household').optional()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -179,7 +180,7 @@ router.post('/profile', [
     const { age, current_annual_gross_income, work_tenure_years,
       total_asset_gross_market_value, total_loan_outstanding_value,
       lifespan_years, income_growth_rate, asset_growth_rate,
-      inflation_rate, equity_growth_rate, debt_growth_rate, personal_asset_value
+      inflation_rate, equity_growth_rate, debt_growth_rate, personal_asset_value, household
     } = filteredBody;
 
     const fields = [];
@@ -199,6 +200,7 @@ router.post('/profile', [
     if (equity_growth_rate !== undefined) { fields.push('equity_growth_rate'); values.push(equity_growth_rate); }
     if (debt_growth_rate !== undefined) { fields.push('debt_growth_rate'); values.push(debt_growth_rate); }
     if (personal_asset_value !== undefined) { fields.push('personal_asset_value'); values.push(personal_asset_value); }
+    if (household !== undefined) { fields.push('household'); values.push(asJson(household)); }
     fields.push('created_at'); values.push('NOW()');
 
     const placeholders = fields.map((_, index) => `$${index + 1}`).join(', ');
@@ -281,7 +283,8 @@ router.put('/profile/:profileId', [
   body('inflation_rate').optional().isFloat({ min: 0, max: 1 }),
   body('equity_growth_rate').optional().isFloat({ min: 0, max: 1 }),
   body('debt_growth_rate').optional().isFloat({ min: 0, max: 1 }),
-  body('personal_asset_value').optional().isFloat({ min: 0 })
+  body('personal_asset_value').optional().isFloat({ min: 0 }),
+  body('household').optional()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -312,12 +315,12 @@ router.put('/profile/:profileId', [
       'age', 'current_annual_gross_income', 'work_tenure_years',
       'total_asset_gross_market_value', 'total_loan_outstanding_value',
       'lifespan_years', 'income_growth_rate', 'asset_growth_rate',
-      'inflation_rate', 'equity_growth_rate', 'debt_growth_rate', 'personal_asset_value'
+      'inflation_rate', 'equity_growth_rate', 'debt_growth_rate', 'personal_asset_value', 'household'
     ]);
     Object.entries(req.body).forEach(([key, value]) => {
       if (value !== undefined && allowed.has(key)) {
         updates.push(`${key} = $${paramCount}`);
-        values.push(value);
+        values.push(key === 'household' ? asJson(value) : value);
         paramCount++;
       }
     });
