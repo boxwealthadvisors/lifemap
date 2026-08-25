@@ -1,0 +1,3 @@
+email,name,tag,category,current_value,sip_amount,sip_frequency,sip_expiry_date,expected_return_pct,notes
+priya@example.com,HDFC Flexi Cap,Investment,Equity mutual funds,1200000,15000,Monthly,2036,12,
+priya@example.com,Noida flat,Personal,Real estate,4200000,0,Monthly,,6,

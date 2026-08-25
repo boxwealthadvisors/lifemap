@@ -16,7 +16,8 @@
     "debug:crash": "node debug-crash.js",
     "debug:simple": "node simple-debug.js",
     "init-db": "node scripts/init-db.js",
-    "init-render-db": "node scripts/init-render-db.js"
+    "init-render-db": "node scripts/init-render-db.js",
+    "import-clients": "node scripts/bulk-import-clients.js"
   },
   "dependencies": {
     "express": "^4.18.2",

@@ -42,12 +42,38 @@ Backend env (do not wipe):
 
 **Never set `DATABASE_INIT=true`.** That runs a wipe-and-recreate script.
 
-### How Claude reaches the live database
+### How Claude updates the live database (bulk)
 
-1. Render dashboard → `lifemaps-db` → **Connections**.
-2. Use **External Database URL** from a one-off script on a trusted machine, **or** Render **Shell** on `lifemaps-backend` (then `cd backend` and run a Node script with the existing `DATABASE_URL`).
-3. Connection is Postgres. SSL is required from outside Render.
-4. **Never paste the connection string, JWT secret, or generated passwords into a public gist.** Give Arun the password sheet privately.
+**Do not use Render Shell for bulk upload.** Shell is fine for a one-line `SELECT`, not for 50–500 clients, xlsx files, or generated passwords. You cannot usefully drop Arun’s spreadsheets into that shell.
+
+**Do this instead** — run the importer on a machine that already has the dump files, talking to Render Postgres over the **External** URL:
+
+1. Render → `lifemaps-db` → **Connections** → copy **External Database URL**.
+2. Normalise Arun’s files to CSV using the headers in `backend/scripts/import-templates/` (xlsx → CSV is fine; the script does not read Excel).
+3. From the repo:
+
+```bash
+cd backend
+# Windows PowerShell
+$env:DATABASE_URL="postgresql://USER:PASSWORD@HOST/lifemaps?sslmode=require"
+node scripts/bulk-import-clients.js --dry-run --admin-username ADVISOR_USERNAME --users .\clients\users.csv
+node scripts/bulk-import-clients.js --admin-username ADVISOR_USERNAME --users .\clients\users.csv --assets .\clients\assets.csv --goals .\clients\goals.csv --loans .\clients\loans.csv --expenses .\clients\expenses.csv --work-assets .\clients\work-assets.csv --insurance .\clients\insurance.csv --out .\clients\passwords.csv
+```
+
+4. Give Arun `passwords.csv` privately. Add `passwords.csv` and dump folders to `.gitignore` if needed. **Never commit them.**
+5. Spot-check: advisor login → user list → open one plan; then one client Sign in.
+
+Each client is one transaction (user + profile + that client’s register rows). A bad row rolls back that client only.
+
+Internal `DATABASE_URL` on the backend service is for the API. The importer needs the **External** URL because it runs off Render.
+
+Render Shell remains useful only for:
+
+```sql
+SELECT id, email, name, admin_id FROM "user" ORDER BY id DESC LIMIT 20;
+```
+
+---
 
 Discover live columns before importing:
 
@@ -343,9 +369,9 @@ Store rupees as numbers. `1500000` not `"15L"`. Convert L/Cr in the importer (`1
 
 ### 5.6 How to run it
 
-Preferred: a Node script in `backend/scripts/` using `bcryptjs` + `pg` and `backend/config/database.js` (uses `DATABASE_URL`). Run from **Render Shell** on `lifemaps-backend` so you never copy the DB URL locally unless Arun wants that.
+Use `backend/scripts/bulk-import-clients.js` with the Render **External** Database URL (see “How Claude updates the live database” above). Templates: `backend/scripts/import-templates/`.
 
-Dry-run first (print mapping, insert nothing). Then a 1-client test. Then the rest. After import, Arun should:
+Dry-run first, then a 1-client test, then the rest. After import, Arun should:
 
 1. Open https://lifemap.finance/admin/login as the advisor  
 2. See the new names in the user register  

@@ -7,3 +7,6 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+passwords.csv
+**/passwords.csv
+backend/clients/
