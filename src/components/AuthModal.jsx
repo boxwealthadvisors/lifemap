@@ -72,12 +72,12 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated }) => {
 
         <form onSubmit={handleLoginSubmit} className="stack">
           <div>
-            <Label htmlFor="login-identifier">Email or username</Label>
+            <Label htmlFor="login-identifier">Username</Label>
             <Input
               id="login-identifier"
               className="lm-inp"
               type="text"
-              placeholder="Client email, or admin username"
+              placeholder="Enter username"
               value={loginForm.identifier}
               onChange={(e) => handleLoginChange('identifier', e.target.value)}
               required
@@ -101,9 +101,6 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated }) => {
             {loading ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
-        <p className="sub" style={{ marginTop: 16, marginBottom: 0 }}>
-          Clients use the email their advisor set up. Advisors and super admins use their username.
-        </p>
       </div>
     </div>
   );

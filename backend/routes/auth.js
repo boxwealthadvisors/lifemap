@@ -97,7 +97,7 @@ router.post('/login', [
     const identifier = String(req.body.identifier || req.body.email || req.body.username || '').trim();
     const { password } = req.body;
     if (!identifier) {
-      return res.status(400).json({ error: 'Enter your email or username' });
+      return res.status(400).json({ error: 'Enter your username' });
     }
 
     const order = identifier.includes('@')
