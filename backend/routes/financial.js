@@ -17,6 +17,35 @@ const checkUserAccess = (req, userId) => {
 
 const DEFAULT_ASSET_TAGS = ['Investment', 'Personal', 'Emergency', 'Retirement'];
 const EXPENSE_FREQUENCIES = ['Monthly', 'Quarterly', 'Yearly', 'Annually', 'Half-yearly', 'Semi-Annually', 'Weekly', 'Fortnightly'];
+const INSURANCE_FREQUENCIES = ['Monthly', 'Quarterly', 'Yearly', 'Annually', 'Annual', 'Half-yearly', 'Semi-Annually'];
+const INSURANCE_COLUMNS = ['policy_type', 'cover', 'premium', 'frequency', 'provider', 'policy_number', 'start_date', 'end_date', 'notes'];
+
+const isoDateOrNull = (value) => {
+  if (value == null || value === '') return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toISOString().slice(0, 10);
+};
+
+const normalizeInsuranceFrequency = (value) => {
+  const k = String(value || 'Yearly').trim().toLowerCase();
+  if (k === 'monthly') return 'Monthly';
+  if (k === 'quarterly') return 'Quarterly';
+  if (k === 'half-yearly' || k === 'semi-annually' || k === 'semi annually') return 'Half-yearly';
+  return 'Yearly';
+};
+
+const insurancePremiumMonthly = (premium, frequency) => {
+  const p = Number(premium) || 0;
+  const f = normalizeInsuranceFrequency(frequency);
+  if (f === 'Monthly') return p;
+  if (f === 'Quarterly') return p / 3;
+  if (f === 'Half-yearly') return p / 6;
+  return p / 12;
+};
 
 const asDecimalRate = (value, fallback = 0.06) => {
   if (value === null || value === undefined || value === '') return fallback;
@@ -2384,28 +2413,26 @@ router.delete('/planned-loans/:loanId', (req, res, next) => {
 
 // Insurance routes (singular)
 router.post('/insurance', [
-  body('policy_type').optional().trim().isLength({ min: 1 }),
-  body('cover').optional().isFloat({ min: 0 }),
-  body('premium').optional().isFloat({ min: 0 }),
-  body('frequency').optional().isIn(['Monthly', 'Quarterly', 'Yearly']),
-  body('provider').optional().trim(),
-  body('policy_number').optional().trim(),
-  body('start_date').optional().isISO8601(),
-  body('end_date').optional().isISO8601(),
-  body('notes').optional().trim()
+  body('policy_type').optional({ checkFalsy: true }).trim(),
+  body('cover').optional({ checkFalsy: true }).isFloat({ min: 0 }),
+  body('premium').optional({ checkFalsy: true }).isFloat({ min: 0 }),
+  body('frequency').optional({ checkFalsy: true }).isIn(INSURANCE_FREQUENCIES),
+  body('provider').optional({ checkFalsy: true }).trim(),
+  body('policy_number').optional({ checkFalsy: true }).trim(),
+  body('start_date').optional({ checkFalsy: true }).isISO8601(),
+  body('end_date').optional({ checkFalsy: true }).isISO8601(),
+  body('notes').optional({ checkFalsy: true }).trim()
 ], async (req, res) => {
   try {
-    const {
-      policy_type,
-      cover,
-      premium,
-      frequency = 'Yearly',
-      provider,
-      policy_number,
-      start_date,
-      end_date,
-      notes
-    } = req.body;
+    const policy_type = String(req.body.policy_type || '').trim() || 'Term life';
+    const cover = req.body.cover != null && req.body.cover !== '' ? parseFloat(req.body.cover) : 0;
+    const premium = req.body.premium != null && req.body.premium !== '' ? parseFloat(req.body.premium) : 0;
+    const frequency = normalizeInsuranceFrequency(req.body.frequency);
+    const provider = req.body.provider || null;
+    const policy_number = req.body.policy_number || null;
+    const start_date = isoDateOrNull(req.body.start_date);
+    const end_date = isoDateOrNull(req.body.end_date);
+    const notes = req.body.notes || null;
 
     // Get or create a default profile for the user
     let profileId;
@@ -2427,7 +2454,7 @@ router.post('/insurance', [
 
     const result = await pool.query(
       'INSERT INTO financial_insurance (user_id, profile_id, policy_type, cover, premium, frequency, provider, policy_number, start_date, end_date, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
-      [req.user.id, profileId, policy_type, cover, premium, frequency, provider, policy_number, start_date || null, end_date, notes]
+      [req.user.id, profileId, policy_type, Number.isFinite(cover) ? cover : 0, Number.isFinite(premium) ? premium : 0, frequency, provider, policy_number, start_date, end_date, notes]
     );
 
     const insuranceId = result.rows[0].id;
@@ -2435,10 +2462,7 @@ router.post('/insurance', [
     // Create expense entry for premium (similar to loan EMI)
     if (premium && premium > 0) {
       try {
-        // Convert premium to monthly if needed
-        let monthlyPremium = premium;
-        if (frequency === 'Yearly') monthlyPremium = premium / 12;
-        else if (frequency === 'Quarterly') monthlyPremium = premium / 3;
+        const monthlyPremium = insurancePremiumMonthly(premium, frequency);
 
         // Check if expense already exists for this insurance
         const existingExpense = await pool.query(
@@ -2503,15 +2527,15 @@ router.get('/insurance/:userId', async (req, res) => {
 });
 
 router.put('/insurance/:insuranceId', [
-  body('policy_type').optional().trim().isLength({ min: 1 }),
-  body('cover').optional().isFloat({ min: 0 }),
-  body('premium').optional().isFloat({ min: 0 }),
-  body('frequency').optional().isIn(['Monthly', 'Quarterly', 'Yearly']),
-  body('provider').optional().trim(),
-  body('policy_number').optional().trim(),
-  body('start_date').optional().isISO8601(),
-  body('end_date').optional().isISO8601(),
-  body('notes').optional().trim()
+  body('policy_type').optional({ checkFalsy: true }).trim(),
+  body('cover').optional({ checkFalsy: true }).isFloat({ min: 0 }),
+  body('premium').optional({ checkFalsy: true }).isFloat({ min: 0 }),
+  body('frequency').optional({ checkFalsy: true }).isIn(INSURANCE_FREQUENCIES),
+  body('provider').optional({ checkFalsy: true }).trim(),
+  body('policy_number').optional({ checkFalsy: true }).trim(),
+  body('start_date').optional({ checkFalsy: true }).isISO8601(),
+  body('end_date').optional({ checkFalsy: true }).isISO8601(),
+  body('notes').optional({ checkFalsy: true }).trim()
 ], async (req, res) => {
   try {
     const { insuranceId } = req.params;
@@ -2530,15 +2554,20 @@ router.put('/insurance/:insuranceId', [
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Build dynamic update query
+    const next = { ...req.body };
+    if (next.frequency != null && next.frequency !== '') next.frequency = normalizeInsuranceFrequency(next.frequency);
+    if ('start_date' in next) next.start_date = isoDateOrNull(next.start_date);
+    if ('end_date' in next) next.end_date = isoDateOrNull(next.end_date);
+    if (next.policy_type === '') next.policy_type = 'Term life';
+
     const updates = [];
     const values = [];
     let paramCount = 1;
 
-    Object.entries(req.body).forEach(([key, value]) => {
-      if (value !== undefined) {
+    INSURANCE_COLUMNS.forEach((key) => {
+      if (next[key] !== undefined) {
         updates.push(`${key} = $${paramCount}`);
-        values.push(value);
+        values.push(next[key]);
         paramCount++;
       }
     });
@@ -2555,16 +2584,13 @@ router.put('/insurance/:insuranceId', [
 
     // Update or create expense entry for premium (similar to loan EMI)
     try {
-      const premium = req.body.premium;
-      const frequency = req.body.frequency || updatedInsurance.frequency;
-      const end_date = req.body.end_date !== undefined ? req.body.end_date : updatedInsurance.end_date;
-      const policy_type = req.body.policy_type || updatedInsurance.policy_type;
+      const premium = next.premium;
+      const frequency = next.frequency || updatedInsurance.frequency;
+      const end_date = next.end_date !== undefined ? next.end_date : updatedInsurance.end_date;
+      const policy_type = next.policy_type || updatedInsurance.policy_type;
 
       if (premium !== undefined && premium > 0) {
-        // Convert premium to monthly if needed
-        let monthlyPremium = premium;
-        if (frequency === 'Yearly') monthlyPremium = premium / 12;
-        else if (frequency === 'Quarterly') monthlyPremium = premium / 3;
+        const monthlyPremium = insurancePremiumMonthly(premium, frequency);
 
         // Check if expense exists for this insurance
         const existingExpense = await pool.query(

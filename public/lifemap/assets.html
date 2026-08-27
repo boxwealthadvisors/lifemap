@@ -238,7 +238,7 @@ td.rt{text-align:right}
 .rb.save:hover{background:#eef3fa; border-color:var(--navy)}
 .rb.save.done{background:#e9f6f4; border-color:#bfe6df; color:#0d6e60}
 .rb.del:hover{color:var(--coral); border-color:#f3c9c5; background:#fef6f5}
-.addbar{padding:14px 20px 18px}
+.addbar{padding:14px 20px 18px; display:flex; gap:10px; flex-wrap:wrap}
 .addrow{width:100%; border:1px dashed #c8d5e8; background:#fbfcfe; color:var(--navy); border-radius:9px;
   padding:12px; font-size:14px; font-weight:700; cursor:pointer}
 .addrow:hover{background:#eef3fa; border-color:var(--navy)}
@@ -267,12 +267,11 @@ td.rt{text-align:right}
 .pmore{width:23px; height:23px; flex:none; border-radius:50%; border:1px solid var(--line);
   background:#fff; color:var(--slate); cursor:pointer; padding:0; position:relative;
   display:inline-flex; align-items:center; justify-content:center; transition:.15s}
-.pmore::before{content:""; width:6px; height:6px; margin-top:-3px;
-  border-right:1.9px solid currentColor; border-bottom:1.9px solid currentColor;
-  transform:rotate(45deg); transition:transform .22s}
+.pmore::before{content:"i"; width:auto; height:auto; margin:0; border:0; transform:none;
+  font-style:italic; font-weight:800; font-size:12px; line-height:1; font-family:var(--font)}
 .pmore:hover{color:var(--navy); border-color:var(--navy); background:#eef3fa}
 .pmore[aria-expanded="true"]{color:#fff; background:var(--navy); border-color:var(--navy)}
-.pmore[aria-expanded="true"]::before{transform:rotate(225deg); margin-top:3px}
+.pmore[aria-expanded="true"]::before{transform:none; margin:0}
 .pdesc{max-height:0; overflow:hidden; opacity:0;
   transition:max-height .3s cubic-bezier(.3,.9,.3,1), opacity .22s ease}
 .pdesc.open{opacity:1}
@@ -360,7 +359,7 @@ td.rt{text-align:right}
   <div class="phead">
     <h1>What you own
       <button class="pmore" type="button" aria-expanded="false" aria-controls="phead-desc" aria-label="Show what this page is for"></button></h1>
-    <div class="pdesc" id="phead-desc"><p>Every holding, in one register. The mix and the growth path below rebuild themselves as you add rows &mdash; and choosing a category fills in a historical return you can then override.</p></div>
+    <div class="pdesc" id="phead-desc"><p>Every holding, in one register &mdash; investments, retirement, emergency and personal assets such as a home or gold. Filter by Personal, or use + Add personal asset. The mix and the growth path below rebuild themselves as you add rows, and choosing a category fills in a historical return you can then override.</p></div>
   </div>
 
   <!-- ===== asset mix ===== -->
@@ -426,6 +425,9 @@ td.rt{text-align:right}
           <span class="lbl">All purposes</span></button>
         <button class="ghost" id="btn-reset">Reset</button>
         <button class="ghost" id="btn-csv">Export CSV</button>
+        <button class="ghost" id="btn-import">Import Excel / CSV</button>
+        <input type="file" id="file-import" accept=".csv,.txt,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
+        <button class="ghost" id="btn-add-personal">+ Add personal asset</button>
         <button class="ghost primary" id="btn-add">+ Add asset</button>
       </div>
     </div>
@@ -452,7 +454,10 @@ td.rt{text-align:right}
       </table>
     </div>
     <div class="empty" id="empty" style="display:none"><b>No assets match</b>Clear the search or filter to see everything.</div>
-    <div class="addbar"><button class="addrow" id="btn-add2">+ Add another asset</button></div>
+    <div class="addbar">
+      <button class="addrow" id="btn-add2">+ Add another asset</button>
+      <button class="addrow" id="btn-add-personal2">+ Add personal asset</button>
+    </div>
     <div class="foot">
       Expected returns are long-run historical averages for each asset class, filled in as a starting point and fully editable. They are not forecasts, and your own holdings may behave very differently. &ldquo;Value in 10 years&rdquo; compounds the current value at that rate and adds SIP contributions until the expiry date you set.
     </div>
@@ -519,6 +524,10 @@ let MODE = "cat", SEARCH = "", FILTER = "", HZ = 10;
 /* ================= HELPERS ================= */
 const $ = id => document.getElementById(id);
 const num = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+const pctStr = v => {
+  const n = num(v);
+  return String(Math.round(n * 10) / 10);
+};
 function fmt(n){
   n = Math.round(n||0); const a = Math.abs(n), s = n<0 ? "\u2212" : "";
   if(a >= 1e7) return s+"\u20B9"+(a/1e7).toFixed(a/1e7>=100?0:2)+"Cr";
@@ -998,7 +1007,7 @@ function drawTable(){
       <td><button type="button" class="dd tagpick" data-dd="tag" aria-haspopup="listbox" aria-expanded="false">
             <span class="sw" style="background:${tag.c}"></span><span class="lbl">${esc(tag.n)}</span></button></td>
       <td><input class="cell money" data-k="val" type="text" inputmode="decimal" value="${r.val}" placeholder="0"></td>
-      <td><input class="cell money" data-k="ret" type="text" inputmode="decimal" value="${r.ret}"></td>
+      <td><input class="cell money" data-k="ret" type="text" inputmode="decimal" value="${pctStr(r.ret)}"></td>
       <td><input class="cell money" data-k="sip" type="text" inputmode="decimal" value="${r.sip}" placeholder="0"></td>
       <td><button type="button" class="dd freqpick" data-dd="freq" aria-haspopup="listbox" aria-expanded="false">
             <span class="lbl">${esc(r.freq)}</span></button></td>
@@ -1066,16 +1075,21 @@ document.querySelectorAll("[data-hz]").forEach(b => b.addEventListener("click", 
   document.querySelectorAll("[data-hz]").forEach(x => x.classList.remove("on"));
   b.classList.add("on"); HZ = +b.dataset.hz; drawGrowth();
 }));
-const addAsset = () => {
-  ROWS.push({id:"temp_"+Date.now(), name:"", cat:"Equity mutual funds", tag:"Investment", val:0, sip:0,
-             freq:"Monthly", exp:"", ret:catOf("Equity mutual funds").ret, notes:"", earmarks:[], saved:false});
-  SEARCH = ""; $("search").value = ""; setFilter("All purposes");
+const addAsset = (tag) => {
+  const purpose = tag || "Investment";
+  const cat = purpose === "Personal" ? "Other" : "Equity mutual funds";
+  ROWS.push({id:"temp_"+Date.now(), name:"", cat, tag: purpose, val:0, sip:0,
+             freq:"Monthly", exp:"", ret:catOf(cat).ret, notes:"", earmarks:[], saved:false});
+  SEARCH = ""; $("search").value = "";
+  setFilter(purpose === "Personal" ? "Personal" : "All purposes");
   refresh();
   const last = $("tbody").lastElementChild;
   if(last) last.querySelector("input").focus();
 };
-$("btn-add").addEventListener("click", addAsset);
-$("btn-add2").addEventListener("click", addAsset);
+$("btn-add").addEventListener("click", () => addAsset("Investment"));
+$("btn-add2").addEventListener("click", () => addAsset("Investment"));
+$("btn-add-personal").addEventListener("click", () => addAsset("Personal"));
+$("btn-add-personal2").addEventListener("click", () => addAsset("Personal"));
 $("search").addEventListener("input", e => { SEARCH = e.target.value; drawTable(); });
 const FILTEROPTS = [{n:"All purposes"}].concat(TAGS.map(t => ({n:t.n, c:t.c})));
 const setFilter = v => {
@@ -1100,6 +1114,236 @@ $("btn-csv").addEventListener("click", () => {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
   a.download = "lifemap-assets.csv"; a.click(); URL.revokeObjectURL(a.href);
+});
+
+function persistImportedRows(){
+  try {
+    if (window.__LIFEMAP__ && typeof window.__LIFEMAP__.getState === "function") {
+      parent.postMessage({ source:"lifemap-mockup", type:"row-save", page:"assets", payload: window.__LIFEMAP__.getState() }, "*");
+    }
+  } catch (err) {}
+}
+function csvEscapeSplit(text){
+  text = String(text || "").replace(/^\uFEFF/, "");
+  const first = (text.split(/\r?\n/).find(l => l.trim()) || "");
+  const counts = { ",":0, ";":0, "\t":0 };
+  let q = false;
+  for (let i = 0; i < first.length; i++) {
+    const c = first[i];
+    if (c === '"') { q = !q; continue; }
+    if (!q && counts[c] != null) counts[c]++;
+  }
+  const delim = counts[";"] > counts[","] && counts[";"] > counts["\t"] ? ";"
+    : counts["\t"] > counts[","] ? "\t" : ",";
+  const rows = [];
+  let row = [], cell = "", i = 0, inQ = false;
+  while (i < text.length) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') {
+        if (text[i+1] === '"') { cell += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      }
+      cell += c; i++; continue;
+    }
+    if (c === '"') { inQ = true; i++; continue; }
+    if (c === delim) { row.push(cell); cell = ""; i++; continue; }
+    if (c === "\r") { i++; continue; }
+    if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; i++; continue; }
+    cell += c; i++;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(x => String(x).trim()));
+}
+function u16le(b, o){ return b[o] | (b[o+1] << 8); }
+function u32le(b, o){ return (b[o] | (b[o+1] << 8) | (b[o+2] << 16) | (b[o+3] << 24)) >>> 0; }
+async function inflateRaw(bytes){
+  const ds = new DecompressionStream("deflate-raw");
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());
+}
+async function unzipXlsx(buf){
+  const b = new Uint8Array(buf);
+  let eocd = -1;
+  for (let i = b.length - 22; i >= 0; i--) {
+    if (u32le(b, i) === 0x06054b50) { eocd = i; break; }
+    if (b.length - i > 0x10015) break;
+  }
+  if (eocd < 0) throw new Error("Not an Excel workbook");
+  const cdOff = u32le(b, eocd + 16);
+  const entries = u16le(b, eocd + 10) || u16le(b, eocd + 8);
+  const files = {};
+  const dec = new TextDecoder();
+  let o = cdOff;
+  for (let n = 0; n < entries; n++) {
+    if (u32le(b, o) !== 0x02014b50) break;
+    const method = u16le(b, o + 10);
+    const comp = u32le(b, o + 20);
+    const nlen = u16le(b, o + 28);
+    const elen = u16le(b, o + 30);
+    const clen = u16le(b, o + 32);
+    const localOff = u32le(b, o + 42);
+    const name = dec.decode(b.slice(o + 46, o + 46 + nlen));
+    const localNlen = u16le(b, localOff + 26);
+    const localElen = u16le(b, localOff + 28);
+    const dataStart = localOff + 30 + localNlen + localElen;
+    let data = b.slice(dataStart, dataStart + comp);
+    if (method === 8) data = await inflateRaw(data);
+    files[name] = data;
+    o += 46 + nlen + elen + clen;
+  }
+  return files;
+}
+function colToIndex(col){
+  let n = 0;
+  for (let i = 0; i < col.length; i++) n = n * 26 + (col.charCodeAt(i) - 64);
+  return n - 1;
+}
+function xlsxSheetRows(files){
+  const xmlOf = bytes => new DOMParser().parseFromString(new TextDecoder().decode(bytes), "application/xml");
+  const strings = [];
+  if (files["xl/sharedStrings.xml"]) {
+    xmlOf(files["xl/sharedStrings.xml"]).querySelectorAll("si").forEach(si => {
+      strings.push([...si.querySelectorAll("t")].map(t => t.textContent).join(""));
+    });
+  }
+  const sheetKey = Object.keys(files).find(k => /^xl\/worksheets\/sheet1\.xml$/i.test(k))
+    || Object.keys(files).find(k => /xl\/worksheets\/sheet\d+\.xml$/i.test(k));
+  if (!sheetKey) throw new Error("No worksheet found");
+  const rows = [];
+  xmlOf(files[sheetKey]).querySelectorAll("sheetData > row").forEach(row => {
+    const cells = [];
+    row.querySelectorAll("c").forEach(c => {
+      const ref = c.getAttribute("r") || "";
+      const idx = colToIndex(ref.replace(/\d+/g, "") || "A");
+      const t = c.getAttribute("t");
+      const v = c.querySelector("v");
+      let val = "";
+      if (t === "s" && v) val = strings[Number(v.textContent)] || "";
+      else if (t === "inlineStr") val = [...c.querySelectorAll("t")].map(n => n.textContent).join("");
+      else if (v) val = v.textContent;
+      cells[idx] = val;
+    });
+    rows.push(cells);
+  });
+  return rows.filter(r => r.some(x => String(x || "").trim()));
+}
+function parseMoneyCell(v){
+  if (v == null || v === "") return 0;
+  let s = String(v).trim().replace(/,/g, "").replace(/₹/g, "").replace(/^rs\.?\s*/i, "");
+  const m = s.match(/^(-?\d+(?:\.\d+)?)\s*(lakh|lac|lacs|l|cr|crore)?$/i);
+  if (!m) return num(s);
+  const n = Number(m[1]);
+  const u = (m[2] || "").toLowerCase();
+  if (u.startsWith("l")) return n * 100000;
+  if (u.startsWith("cr")) return n * 10000000;
+  return n;
+}
+function parsePctCell(v){
+  if (v == null || v === "") return 6;
+  const s = String(v).trim().replace(/%/g, "");
+  const n = num(s);
+  return n > 0 && n <= 1 ? Math.round(n * 1000) / 10 : Math.round(n * 10) / 10;
+}
+function keyHead(h){
+  return String(h || "").trim().toLowerCase().replace(/[%.]/g, " ").replace(/\s+/g, " ");
+}
+function matchCatName(v){
+  const s = String(v || "").trim();
+  if (!s) return "Other";
+  const exact = CATS.find(c => c.n.toLowerCase() === s.toLowerCase());
+  if (exact) return exact.n;
+  const part = CATS.find(c => s.toLowerCase().includes(c.n.toLowerCase()) || c.n.toLowerCase().includes(s.toLowerCase()));
+  return part ? part.n : s;
+}
+function matchTagName(v){
+  const s = String(v || "").trim();
+  const exact = TAGS.find(t => t.n.toLowerCase() === s.toLowerCase());
+  if (exact) return exact.n;
+  if (/personal/i.test(s)) return "Personal";
+  if (/retire/i.test(s)) return "Retirement";
+  if (/emerg/i.test(s)) return "Emergency";
+  if (/invest/i.test(s)) return "Investment";
+  return s || "Investment";
+}
+function rowsFromTable(table){
+  if (!table.length) return [];
+  const heads = table[0].map(keyHead);
+  const idx = (aliases) => {
+    for (const a of aliases) {
+      const i = heads.findIndex(h => h === a || h.includes(a));
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const iName = idx(["name", "asset", "holding"]);
+  const iCat = idx(["category", "asset class", "class"]);
+  const iTag = idx(["purpose", "tag"]);
+  const iVal = idx(["current value", "market value", "value", "amount"]);
+  const iRet = idx(["expected return", "return", "growth"]);
+  const iSip = idx(["sip amount", "sip"]);
+  const iFreq = idx(["sip frequency", "frequency"]);
+  const iExp = idx(["sip expiry", "expiry"]);
+  const iNotes = idx(["notes", "note", "remark"]);
+  const out = [];
+  table.slice(1).forEach(cells => {
+    const name = iName >= 0 ? String(cells[iName] || "").trim() : "";
+    const val = parseMoneyCell(iVal >= 0 ? cells[iVal] : "");
+    if (!name && !val) return;
+    const cat = matchCatName(iCat >= 0 ? cells[iCat] : "");
+    const tag = matchTagName(iTag >= 0 ? cells[iTag] : "Investment");
+    const freqRaw = iFreq >= 0 ? String(cells[iFreq] || "Monthly").trim() : "Monthly";
+    const freq = FREQ.find(f => f.toLowerCase() === freqRaw.toLowerCase()) || "Monthly";
+    out.push({
+      id: "temp_" + Date.now() + "_" + out.length,
+      name: name || "Imported asset",
+      cat,
+      tag,
+      val,
+      sip: parseMoneyCell(iSip >= 0 ? cells[iSip] : ""),
+      freq,
+      exp: iExp >= 0 ? String(cells[iExp] || "").trim() : "",
+      ret: parsePctCell(iRet >= 0 ? cells[iRet] : catOf(cat).ret),
+      notes: iNotes >= 0 ? String(cells[iNotes] || "").trim() : "",
+      earmarks: tag === "Personal" ? [] : [],
+      saved: false
+    });
+  });
+  return out;
+}
+async function importAssetFile(file){
+  const name = (file.name || "").toLowerCase();
+  let table;
+  if (name.endsWith(".xlsx")) {
+    if (typeof DecompressionStream === "undefined") {
+      alert("This browser cannot read .xlsx here. In Excel choose File → Save As → CSV UTF-8, then import that file.");
+      return;
+    }
+    try {
+      table = xlsxSheetRows(await unzipXlsx(await file.arrayBuffer()));
+    } catch (err) {
+      alert("Could not read that Excel file. Save it as CSV UTF-8 from Excel and import that instead.");
+      return;
+    }
+  } else {
+    table = csvEscapeSplit(await file.text());
+  }
+  const incoming = rowsFromTable(table);
+  if (!incoming.length) {
+    alert("No asset rows found. Use columns like Name, Category, Purpose, Current value, Expected return %.");
+    return;
+  }
+  incoming.forEach(r => ROWS.push(r));
+  SEARCH = ""; if ($("search")) $("search").value = "";
+  setFilter("All purposes");
+  refresh();
+  persistImportedRows();
+  alert("Imported " + incoming.length + (incoming.length === 1 ? " asset." : " assets."));
+}
+$("btn-import").addEventListener("click", () => $("file-import").click());
+$("file-import").addEventListener("change", async e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (file) await importAssetFile(file);
 });
 
 /* ========================= STACKED NAV =========================
@@ -1303,6 +1547,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
     set("i-gsal", S.gSal);
     set("i-gsal2", S.gSal);
     set("i-work-age", S.workTill);
+    set("i-life-age", S.lifeTo);
     set("i-fin-assets", S.finAssets);
     set("i-personal-assets", S.personalAssets);
     set("i-gret", S.gRet); setTxt("o-gret", Number(S.gRet).toFixed(1)+"%");
@@ -1554,7 +1799,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
   });
 
   var ageTimer = null;
-  ["i-age","i-life","i-ginf","i-ret"].forEach(function(id){
+  ["i-age","i-life","i-life-age","i-work-age","i-ginf","i-ret"].forEach(function(id){
     var el = $(id);
     if (!el) return;
     el.addEventListener("change", function(){

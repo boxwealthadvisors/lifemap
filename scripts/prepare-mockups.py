@@ -121,6 +121,7 @@ __MARKER_START__
     set("i-gsal", S.gSal);
     set("i-gsal2", S.gSal);
     set("i-work-age", S.workTill);
+    set("i-life-age", S.lifeTo);
     set("i-fin-assets", S.finAssets);
     set("i-personal-assets", S.personalAssets);
     set("i-gret", S.gRet); setTxt("o-gret", Number(S.gRet).toFixed(1)+"%");
@@ -372,7 +373,7 @@ __MARKER_START__
   });
 
   var ageTimer = null;
-  ["i-age","i-life","i-ginf","i-ret"].forEach(function(id){
+  ["i-age","i-life","i-life-age","i-work-age","i-ginf","i-ret"].forEach(function(id){
     var el = $(id);
     if (!el) return;
     el.addEventListener("change", function(){

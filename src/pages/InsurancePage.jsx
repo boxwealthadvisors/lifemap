@@ -390,28 +390,57 @@ export default function InsurancePage() {
   };
 
   const persistInsuranceRow = async (row, rowIndex) => {
-    if (!row?.policyType || !(parseFloat(row.cover) > 0 || parseFloat(row.premium) > 0)) return;
-    const endDate = row.endDate || (row.expiryYear ? `${parseInt(row.expiryYear, 10)}-12-31` : null);
-    const payload = {
-      policy_type: row.policyType,
-      cover: parseFloat(row.cover) || 0,
-      premium: parseFloat(row.premium) || 0,
-      frequency: row.frequency || 'Yearly',
-      provider: row.provider,
-      policy_number: row.policyNumber,
-      start_date: row.startDate || null,
-      end_date: endDate,
-      notes: row.notes,
+    const policyType = String(row?.policyType || '').trim() || 'Term life';
+    const cover = parseFloat(row.cover) || 0;
+    const premium = parseFloat(row.premium) || 0;
+    const hasSubstance = cover > 0 || premium > 0
+      || String(row.provider || '').trim()
+      || String(row.policyNumber || '').trim()
+      || String(row.notes || '').trim()
+      || String(row.policyType || '').trim();
+    if (!hasSubstance) return;
+
+    const isoDate = (v) => {
+      if (!v) return null;
+      const s = String(v).trim();
+      if (!s) return null;
+      return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
     };
+    const frequency = (() => {
+      const k = String(row.frequency || 'Yearly').trim().toLowerCase();
+      if (k === 'monthly') return 'Monthly';
+      if (k === 'quarterly') return 'Quarterly';
+      if (k === 'half-yearly' || k === 'semi-annually' || k === 'semi annually') return 'Half-yearly';
+      return 'Yearly';
+    })();
+    const endDate = isoDate(row.endDate) || (row.expiryYear ? `${parseInt(row.expiryYear, 10)}-12-31` : null);
+    const payload = {
+      policy_type: policyType,
+      cover,
+      premium,
+      frequency,
+      provider: row.provider || null,
+      policy_number: row.policyNumber || null,
+      start_date: isoDate(row.startDate),
+      end_date: endDate,
+      notes: row.notes || null,
+    };
+    const create = (body) => isAdminMode
+      ? ApiService.createFinancialInsuranceForUser(body, effectiveUserId)
+      : ApiService.createFinancialInsurance(body);
+    const update = (id, body) => isAdminMode
+      ? ApiService.updateFinancialInsuranceForUser(id, body, effectiveUserId)
+      : ApiService.updateFinancialInsurance(id, body);
+
     if (row.id && !String(row.id).startsWith('temp_')) {
-      await ApiService.updateFinancialInsurance(row.id, payload);
+      await update(row.id, payload);
       return;
     }
     if (String(row.id || '').startsWith('temp_')) {
-      const created = await ApiService.createFinancialInsurance(payload);
+      const created = await create(payload);
       const newId = created?.insurance?.id || created?.id;
       if (newId != null && rowIndex != null) {
-        setRows((prev) => prev.map((r, i) => (i === rowIndex ? { ...r, id: newId } : r)));
+        setRows((prev) => prev.map((r, i) => (i === rowIndex ? { ...r, id: newId, policyType } : r)));
       }
     }
   };
@@ -425,7 +454,7 @@ export default function InsurancePage() {
   const addRow = () => {
     const newRow = {
       id: `temp_${Date.now()}`,
-      policyType: '',
+      policyType: 'Term life',
       cover: 0,
       premium: 0,
       frequency: 'Yearly',
@@ -444,7 +473,9 @@ export default function InsurancePage() {
     
     if (row.id && !row.id.toString().startsWith('temp_')) {
       try {
-        await ApiService.deleteFinancialInsurance(row.id);
+        await (isAdminMode
+          ? ApiService.deleteFinancialInsuranceForUser(row.id, effectiveUserId)
+          : ApiService.deleteFinancialInsurance(row.id));
         setRows(rows.filter((_, i) => i !== rowIndex));
       } catch (error) {
         console.error('Error deleting insurance:', error);
@@ -504,27 +535,40 @@ export default function InsurancePage() {
   };
 
   // Calculate summary statistics
-  const totalCover = rows.reduce((sum, policy) => sum + (parseFloat(policy.cover) || 0), 0);
+  const coverBucket = (type) => {
+    const t = String(type || '').toLowerCase();
+    if (/health|mediclaim|floater|top-?up/.test(t)) return 'health';
+    if (/motor|car|two.?wheeler|travel|home|house|fire|property/.test(t)) return 'other';
+    if (/term|life|ulip|endow|whole|pension/.test(t)) return 'life';
+    return 'other';
+  };
+  const coverByType = rows.reduce((acc, policy) => {
+    const amount = parseFloat(policy.cover) || 0;
+    acc[coverBucket(policy.policyType)] += amount;
+    return acc;
+  }, { life: 0, health: 0, other: 0 });
+  const lifeCover = coverByType.life;
   const totalAnnualPremium = rows.reduce((sum, policy) => {
     const premium = parseFloat(policy.premium) || 0;
-    const frequency = policy.frequency || 'Yearly';
-    
-    // Convert to annual premium
-    let annualPremium = premium;
-    if (frequency === 'Monthly') annualPremium = premium * 12;
-    else if (frequency === 'Quarterly') annualPremium = premium * 4;
-    
-    return sum + annualPremium;
+    const k = String(policy.frequency || 'Yearly').toLowerCase();
+    if (k === 'monthly') return sum + premium * 12;
+    if (k === 'quarterly') return sum + premium * 4;
+    if (k === 'half-yearly' || k === 'semi-annually' || k === 'semi annually') return sum + premium * 2;
+    return sum + premium;
   }, 0);
   
-  // Calculate uncovered insurance
-  const uncoveredInsurance = Math.max(0, insuranceNeeded - totalCover);
+  // Gap vs what the family would need uses life / term cover only
+  const uncoveredInsurance = Math.max(0, insuranceNeeded - lifeCover);
 
   const columns = [
-    { field: 'policyType', headerName: 'Policy Type' },
+    { field: 'policyType', headerName: 'Policy Type', type: 'select', options: (row) => {
+      const base = ['Term life', 'Whole life', 'ULIP', 'Endowment', 'Health', 'Super top-up', 'Personal accident', 'Motor', 'Home', 'Travel', 'Other'];
+      if (row?.policyType && !base.includes(row.policyType)) return [row.policyType, ...base];
+      return base;
+    } },
     { field: 'cover', headerName: 'Cover Amount', type: 'number' },
     { field: 'premium', headerName: 'Premium', type: 'number' },
-    { field: 'frequency', headerName: 'Frequency' },
+    { field: 'frequency', headerName: 'Frequency', type: 'select', options: ['Monthly', 'Quarterly', 'Half-yearly', 'Yearly'] },
     { field: 'provider', headerName: 'Provider' },
     { field: 'policyNumber', headerName: 'Policy No.' },
     { field: 'startDate', headerName: 'Start Date', type: 'date' },
@@ -577,8 +621,8 @@ export default function InsurancePage() {
               <b>+ {formatCurrency(calculations.totalExistingAssets)}</b>
             </div>
             <div className="lm-grow">
-              <span>Insurance cover</span>
-              <b>{formatCurrency(totalCover)}</b>
+              <span>Life cover</span>
+              <b>{formatCurrency(lifeCover)}</b>
             </div>
             <div className={`lm-grow ${uncoveredInsurance > 0 ? 'neg' : 'pos'}`}>
               <span>Uncovered</span>
@@ -609,8 +653,16 @@ export default function InsurancePage() {
 
       <div className="lm-stats">
         <div className="lm-stat">
-          <div className="k">Total coverage</div>
-          <div className="v">{formatCurrency(totalCover)}</div>
+          <div className="k">Life cover</div>
+          <div className="v">{formatCurrency(lifeCover)}</div>
+        </div>
+        <div className="lm-stat">
+          <div className="k">Health cover</div>
+          <div className="v">{formatCurrency(coverByType.health)}</div>
+        </div>
+        <div className="lm-stat">
+          <div className="k">Other cover</div>
+          <div className="v">{formatCurrency(coverByType.other)}</div>
         </div>
         <div className="lm-stat">
           <div className="k">Annual premiums</div>

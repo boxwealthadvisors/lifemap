@@ -295,12 +295,11 @@ td.rt{text-align:right}
 .pmore{width:23px; height:23px; flex:none; border-radius:50%; border:1px solid var(--line);
   background:#fff; color:var(--slate); cursor:pointer; padding:0; position:relative;
   display:inline-flex; align-items:center; justify-content:center; transition:.15s}
-.pmore::before{content:""; width:6px; height:6px; margin-top:-3px;
-  border-right:1.9px solid currentColor; border-bottom:1.9px solid currentColor;
-  transform:rotate(45deg); transition:transform .22s}
+.pmore::before{content:"i"; width:auto; height:auto; margin:0; border:0; transform:none;
+  font-style:italic; font-weight:800; font-size:12px; line-height:1; font-family:var(--font)}
 .pmore:hover{color:var(--navy); border-color:var(--navy); background:#eef3fa}
 .pmore[aria-expanded="true"]{color:#fff; background:var(--navy); border-color:var(--navy)}
-.pmore[aria-expanded="true"]::before{transform:rotate(225deg); margin-top:3px}
+.pmore[aria-expanded="true"]::before{transform:none; margin:0}
 .pdesc{max-height:0; overflow:hidden; opacity:0;
   transition:max-height .3s cubic-bezier(.3,.9,.3,1), opacity .22s ease}
 .pdesc.open{opacity:1}

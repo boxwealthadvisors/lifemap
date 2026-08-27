@@ -65,7 +65,8 @@ const realId = (id) => id != null && !String(id).startsWith('temp_')
 const asPct = (v, fallback = 0) => {
   const n = num(v, fallback)
   if (!Number.isFinite(n)) return fallback
-  return n > 0 && n <= 1 ? n * 100 : n
+  const pct = n > 0 && n <= 1 ? n * 100 : n
+  return Math.round(pct * 10) / 10
 }
 
 const asRate = (v, fallback = 0) => {

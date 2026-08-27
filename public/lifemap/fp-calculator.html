@@ -186,12 +186,11 @@ a{color:inherit} button,input,select{font-family:var(--font)}
 .pmore{width:27px; height:27px; flex:none; border-radius:50%; cursor:pointer; padding:0;
   border:1px solid rgba(188,210,240,.45); background:rgba(255,255,255,.07); color:#bcd2f0;
   display:inline-flex; align-items:center; justify-content:center; transition:.15s}
-.pmore::before{content:""; width:7px; height:7px; margin-top:-3px;
-  border-right:2px solid currentColor; border-bottom:2px solid currentColor;
-  transform:rotate(45deg); transition:transform .22s}
+.pmore::before{content:"i"; width:auto; height:auto; margin:0; border:0; transform:none;
+  font-style:italic; font-weight:800; font-size:13px; line-height:1; font-family:var(--font)}
 .pmore:hover{color:#fff; border-color:#fff; background:rgba(255,255,255,.18)}
 .pmore[aria-expanded="true"]{color:#0a1f44; background:#fff; border-color:#fff}
-.pmore[aria-expanded="true"]::before{transform:rotate(225deg); margin-top:3px}
+.pmore[aria-expanded="true"]::before{transform:none; margin:0}
 .pdesc{max-height:0; overflow:hidden; opacity:0;
   transition:max-height .3s cubic-bezier(.3,.9,.3,1), opacity .22s ease}
 .pdesc.open{opacity:1}
@@ -315,12 +314,11 @@ a{color:inherit} button,input,select{font-family:var(--font)}
 .ghint{width:19px; height:19px; flex:none; border-radius:50%; border:1px solid var(--line);
   background:#fff; color:var(--slate); cursor:pointer; padding:0; position:relative;
   display:inline-flex; align-items:center; justify-content:center; transition:.15s}
-.ghint::before{content:""; width:5px; height:5px; margin-left:-2px;
-  border-right:1.6px solid currentColor; border-top:1.6px solid currentColor;
-  transform:rotate(45deg); transition:transform .18s}
+.ghint::before{content:"i"; width:auto; height:auto; margin:0; border:0; transform:none;
+  font-style:italic; font-weight:800; font-size:10px; line-height:1; font-family:var(--font)}
 .ghint:hover{color:var(--navy); border-color:var(--navy); background:#eef3fa}
 .ghint[aria-expanded="true"]{color:#fff; background:var(--navy); border-color:var(--navy)}
-.ghint[aria-expanded="true"]::before{transform:rotate(225deg); margin-left:2px}
+.ghint[aria-expanded="true"]::before{transform:none; margin:0}
 .gsub{font-size:12.5px; color:var(--muted); min-width:0; overflow:hidden; white-space:nowrap;
   text-overflow:ellipsis; max-width:0; opacity:0; transition:max-width .28s cubic-bezier(.3,.9,.3,1), opacity .18s}
 .gsub.open{max-width:60ch; opacity:1}
@@ -502,7 +500,7 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
           <div class="ffrow"><span>Financial assets at age <span id="ff-lifeage">85</span></span><b class="num" id="ff-end">&mdash;</b></div>
         </div>
 
-        <div class="ffcav">This is an estimate, not a promise. Financial freedom means salary has become optional; the projection may still include salary until your selected working age. The planning range comes from varying return and inflation slightly.</div>
+        <div class="ffcav">This is an estimate, not a promise. Financial freedom means salary has become optional; the projection may still include salary until your selected working age. Planning range is your current age through the last age on this chart.</div>
       </div>
 
     </div>
@@ -618,6 +616,7 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
           <div class="f"><label><b>Annual take-home salary</b></label><input class="inp" type="text" inputmode="decimal" id="i-salary" value="900000"><div class="hint">The annual amount available for spending and investing. Salary only; tax is not calculated separately.</div></div>
           <div class="f"><label><b>Salary growth</b> (%)</label><input class="inp" type="text" inputmode="decimal" id="i-gsal" value="8"><div class="hint">The raise you expect each year</div></div>
           <div class="f"><label><b>Working till age</b></label><input class="inp" type="text" inputmode="numeric" id="i-work-age" value="60"><div class="hint">Salary is included until this age and becomes zero from this age onward.</div></div>
+          <div class="f"><label><b>Plan till age</b></label><input class="inp" type="text" inputmode="numeric" id="i-life-age" value="85"><div class="hint">The last age on the freedom chart. Same as life expectancy in Assumptions.</div></div>
         </div>
         <div class="rowfoot" id="profile-note">&nbsp;</div>
       </div>
@@ -625,13 +624,13 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
 
     <details class="grp g-family" id="g-family" style="--accent:#7b61c9">
       <summary><span class="gnum">02</span>
-        <span class="gline"><span class="gtitle">Household</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Spouse, children or parents — add anyone whose income belongs in this plan</span></span>
+        <span class="gline"><span class="gtitle">Family Members</span><button class="ghint" type="button" aria-expanded="false" aria-label="What goes in this section"></button><span class="gsub">Spouse, children or parents — add anyone whose income belongs in this plan</span></span>
         <span class="gval num" id="v-family">&mdash;</span><span class="caret">&#9660;</span></summary>
       <div class="gbody">
         <div class="rowhead"><span>Name</span><span>Relation</span><span>Age</span><span>Income &#8377;/yr</span><span>Growth %</span><span>Work till</span><span></span></div>
         <div class="rows" id="rows-family"></div>
         <button class="addrow" type="button" id="add-family">+ Add a family member</button>
-        <div class="rowfoot" id="family-note">Each person with income grows at their own rate until their working age. Dependants with no income can still be listed so the household is complete.</div>
+        <div class="rowfoot" id="family-note">Each person with income grows at their own rate until their working age. Dependants with no income can still be listed so the family list is complete.</div>
       </div>
     </details>
 
@@ -749,7 +748,7 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
     <span style="margin-left:auto"><a href="#">Terms</a> &nbsp;&middot;&nbsp; <a href="#">Privacy</a> &nbsp;&middot;&nbsp; <a href="#">Talk to an advisor</a></span>
   </div>
   <div class="disclaimer">
-    LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It uses salary, work-asset streams and household income, each with its own growth rate and end age; personal assets are not sold to fund the plan; loan instalments repay the balance without interest; and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
+    LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It uses salary, work-asset streams and family-member income, each with its own growth rate and end age; personal assets are not sold to fund the plan; loan instalments repay the balance without interest; and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
   </div>
 </footer>
 
@@ -829,7 +828,7 @@ function incomeItemsNow(){
     n:w.name || ("Income stream "+(i+1)), v:num(w.amt),
     d:"Grows at "+num(w.g)+"%"+" a year until age "+num(w.end, 65)+"." }); });
   (S.household || []).forEach((m,i) => { if(num(m.income) > 0) items.push({
-    n:(m.n || "Family member")+" · "+(m.rel || "household"), v:num(m.income),
+    n:(m.n || "Family member")+" · "+(m.rel || "family"), v:num(m.income),
     d:"Grows at "+num(m.g, S.gSal)+"% a year until age "+num(m.workTill, S.workTill)+"." }); });
   return items;
 }
@@ -1441,7 +1440,6 @@ function refresh(){
     ageEl.textContent = "Not within this plan";
     ageEl.className = "ffage num none";
     $("ff-years").textContent = "On these figures your financial assets do not reach the required corpus before salary stops at age " + FF.workAge + ".";
-    $("ff-range").textContent = "\u2014";
     $("ff-need").textContent = "\u2014";
     $("ff-have").textContent = "\u2014";
   } else {
@@ -1451,15 +1449,10 @@ function refresh(){
     $("ff-years").textContent = FF.ff === 0
       ? "Work is optional today. Salary is still included until age " + FF.workAge + "."
       : "Approximately " + FF.ff + (FF.ff === 1 ? " year" : " years") + " from now. Salary continues until age " + FF.workAge + ".";
-    const lo = engine({gRet:S.gRet+1, gInf:Math.max(0,S.gInf-0.5)}).ff;
-    const hi = engine({gRet:Math.max(1,S.gRet-1), gInf:S.gInf+0.5}).ff;
-    const a = lo < 0 ? null : S.age+lo, b = hi < 0 ? null : S.age+hi;
-    $("ff-range").textContent = (a === null || b === null)
-      ? "age " + ffAge + " or later"
-      : (a === b ? "age " + a : "age " + Math.min(a,b) + "\u2013" + Math.max(a,b));
     $("ff-need").textContent = fmt(FF.real(FF.req[FF.ff], FF.ff));
     $("ff-have").textContent = fmt(FF.real(FF.pool[FF.ff], FF.ff));
   }
+  $("ff-range").textContent = "age " + S.age + "\u2013" + S.lifeTo;
   $("ff-workage").textContent = "Age " + FF.workAge;
   $("ff-lifeage").textContent = S.lifeTo;
   $("ff-end").textContent = fmt(FF.real(FF.pool[FF.N], FF.N));
@@ -1475,7 +1468,7 @@ function refresh(){
   const inItems = incomeItemsNow().map((it,i) => ({...it, c:pick(PAL_HAVE,i)}));
   const surGroups = [
     {n:"Money in", v:c.salary, c:GRP_IN,
-     d:"Salary, work-asset streams and household income for this year.",
+     d:"Salary, work-asset streams and family income for this year.",
      items: inItems},
     {n:"Money out", v:c.outgo, c:GRP_OUT,
      d:"Everything that leaves your hands this year: living costs plus loan instalments.",
@@ -1594,23 +1587,77 @@ function refresh(){
 [["i-salary","salary"],["i-fin-assets","finAssets"],["i-personal-assets","personalAssets"]]
   .forEach(([id,k]) => $(id).addEventListener("input", e => { S[k] = num(e.target.value); refresh(); }));
 $("i-age").addEventListener("input", e => {
-  S.age = Math.min(99, Math.max(18, Math.round(num(e.target.value))));
-  e.target.value = S.age;
-  const minLife = Math.min(100, S.age+1);
-  $("i-life").min = minLife;
-  if(S.lifeTo < minLife){ S.lifeTo = minLife; $("i-life").value = S.lifeTo; $("o-life").textContent = S.lifeTo; }
-  $("i-work-age").min = S.age;
-  $("i-work-age").max = S.lifeTo;
+  const parsed = Math.round(num(e.target.value));
+  if(String(e.target.value).trim() === "" || !isFinite(parsed)) return;
+  if(parsed < 1 || parsed > 120) return;
+  S.age = parsed;
+  applyAgeBounds(false);
+  refresh();
+});
+$("i-age").addEventListener("change", () => commitAge());
+$("i-age").addEventListener("blur", () => commitAge());
+function applyAgeBounds(rewriteOthers){
+  S.age = Math.min(99, Math.max(18, Math.round(num(S.age)) || 18));
+  const minLife = Math.min(100, S.age + 1);
+  if($("i-life")) $("i-life").min = minLife;
+  if(S.lifeTo < minLife) S.lifeTo = minLife;
   if(S.workTill < S.age) S.workTill = S.age;
   if(S.workTill > S.lifeTo) S.workTill = S.lifeTo;
-  $("i-work-age").value = S.workTill;
+  if(rewriteOthers){
+    if($("i-work-age")) $("i-work-age").value = S.workTill;
+    syncLifeInputs();
+  }
+}
+function commitAge(){
+  const el = $("i-age");
+  const parsed = Math.round(num(el.value));
+  S.age = Math.min(99, Math.max(18, isFinite(parsed) && String(el.value).trim() !== "" ? parsed : S.age));
+  el.value = S.age;
+  applyAgeBounds(true);
   refresh();
-});
+}
+function commitWorkTill(){
+  const el = $("i-work-age");
+  const parsed = Math.round(num(el.value));
+  S.workTill = Math.min(S.lifeTo, Math.max(S.age, isFinite(parsed) && String(el.value).trim() !== "" ? parsed : S.workTill));
+  el.value = S.workTill;
+  refresh();
+}
+function syncLifeInputs(){
+  if($("i-life")) $("i-life").value = S.lifeTo;
+  if($("o-life")) $("o-life").textContent = S.lifeTo;
+  if($("i-life-age")) $("i-life-age").value = S.lifeTo;
+}
+function commitLifeTo(raw){
+  const parsed = Math.round(num(raw));
+  S.lifeTo = Math.max(S.age + 1, Math.min(100, isFinite(parsed) ? parsed : S.lifeTo));
+  syncLifeInputs();
+  if($("i-work-age")) $("i-work-age").max = S.lifeTo;
+  if(S.workTill > S.lifeTo){ S.workTill = S.lifeTo; if($("i-work-age")) $("i-work-age").value = S.workTill; }
+  refresh();
+}
 $("i-work-age").addEventListener("input", e => {
-  S.workTill = Math.min(S.lifeTo, Math.max(S.age, Math.round(num(e.target.value))));
-  e.target.value = S.workTill;
+  const parsed = Math.round(num(e.target.value));
+  if(String(e.target.value).trim() === "" || !isFinite(parsed)) return;
+  if(parsed < 1 || parsed > 120) return;
+  S.workTill = parsed;
   refresh();
 });
+$("i-work-age").addEventListener("change", commitWorkTill);
+$("i-work-age").addEventListener("blur", commitWorkTill);
+if($("i-life-age")){
+  $("i-life-age").addEventListener("input", e => {
+    const parsed = Math.round(num(e.target.value));
+    if(String(e.target.value).trim() === "" || !isFinite(parsed)) return;
+    if(parsed < 1 || parsed > 120) return;
+    S.lifeTo = parsed;
+    if($("i-life")) $("i-life").value = S.lifeTo;
+    if($("o-life")) $("o-life").textContent = S.lifeTo;
+    refresh();
+  });
+  $("i-life-age").addEventListener("change", e => commitLifeTo(e.target.value));
+  $("i-life-age").addEventListener("blur", e => commitLifeTo(e.target.value));
+}
 
 /* salary growth appears beside the salary and in assumptions; keep both in step */
 function setGSal(v){
@@ -1624,11 +1671,7 @@ $("i-gsal2").addEventListener("input", e => setGSal(e.target.value));
 $("i-gret").addEventListener("input",  e => { S.gRet = num(e.target.value); $("o-gret").textContent = S.gRet.toFixed(1)+"%"; refresh(); });
 $("i-ginf").addEventListener("input",  e => { S.gInf = num(e.target.value); $("o-ginf").textContent = S.gInf.toFixed(1)+"%"; refresh(); });
 $("i-life").addEventListener("input",  e => {
-  S.lifeTo = Math.max(S.age+1, num(e.target.value));
-  $("o-life").textContent = S.lifeTo;
-  $("i-work-age").max = S.lifeTo;
-  if(S.workTill > S.lifeTo){ S.workTill = S.lifeTo; $("i-work-age").value = S.workTill; }
-  refresh();
+  commitLifeTo(e.target.value);
 });
 
 let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(drawFF, 120); });
@@ -1783,6 +1826,7 @@ refresh();
     set("i-gsal", S.gSal);
     set("i-gsal2", S.gSal);
     set("i-work-age", S.workTill);
+    set("i-life-age", S.lifeTo);
     set("i-fin-assets", S.finAssets);
     set("i-personal-assets", S.personalAssets);
     set("i-gret", S.gRet); setTxt("o-gret", Number(S.gRet).toFixed(1)+"%");
@@ -2034,7 +2078,7 @@ refresh();
   });
 
   var ageTimer = null;
-  ["i-age","i-life","i-ginf","i-ret"].forEach(function(id){
+  ["i-age","i-life","i-life-age","i-work-age","i-ginf","i-ret"].forEach(function(id){
     var el = $(id);
     if (!el) return;
     el.addEventListener("change", function(){
