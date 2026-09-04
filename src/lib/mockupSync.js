@@ -2,6 +2,7 @@ import ApiService from '../services/api'
 import {
   annualAmount,
   asList,
+  assetMaturityRows,
   combinedAssets,
   combinedWorkUnassigned,
   floorLump,
@@ -42,6 +43,7 @@ export function emptyMockupState(page) {
         workTill: 60,
         finAssets: 0,
         personalAssets: 0,
+        assetMaturities: [],
         loans: [],
         goals: [],
         exp: [],
@@ -73,6 +75,15 @@ const asRate = (v, fallback = 0) => {
   const n = num(v, fallback)
   if (!Number.isFinite(n)) return fallback
   return n > 1 ? n / 100 : n
+}
+
+// <input type="date"> only accepts YYYY-MM-DD, so trim anything timestamp-shaped.
+const asDateInput = (v) => {
+  if (v == null || v === '') return ''
+  const s = String(v)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
 }
 
 function bindFinancialApi(userId, admin) {
@@ -214,7 +225,7 @@ function rowHasContent(row) {
     (row.prov && String(row.prov).trim())
   )
   if (identity) return true
-  return [row.val, row.amt, row.cost, row.bal, row.v, row.emi, row.sip]
+  return [row.val, row.amt, row.cost, row.bal, row.v, row.emi, row.sip, row.mval]
     .some((value) => num(value) > 0)
 }
 
@@ -306,6 +317,7 @@ export async function loadMockupState(page, userId, options = {}) {
         workTill: age + num(profile?.work_tenure_years, 28),
         finAssets: assetsCombined.financial,
         personalAssets: assetsCombined.personal,
+        assetMaturities: assetMaturityRows(assetsRes),
         loans: asList(loansRes, 'loans').map((l) => ({
           id: l.id,
           n: l.loanName || l.name || l.type || 'Loan',
@@ -357,6 +369,8 @@ export async function loadMockupState(page, userId, options = {}) {
         freq: a.sip_frequency || cd.sipFrequency || 'Monthly',
         exp: a.sip_expiry_date || cd.sipExpiryDate || '',
         ret: asPct(a.expected_return ?? cd.expectedReturn, 6),
+        mat: asDateInput(a.maturity_date ?? cd.maturityDate),
+        mval: num(a.maturity_value ?? cd.maturityValue),
         notes: a.notes || cd.notes || '',
         earmarks: (cd.goalEarmarks || []).map((e) => ({
           id: e.goalId || e.id,
@@ -704,6 +718,8 @@ export async function saveMockupState(page, userId, state, options = {}) {
         sip_frequency: row.freq || 'Monthly',
         sip_expiry_date: row.exp || null,
         expected_return: asRate(row.ret, 0.06),
+        maturity_date: row.mat || null,
+        maturity_value: num(row.mval) > 0 ? num(row.mval) : null,
         notes: row.notes || '',
         custom_data: {
           ...(prior?.custom_data || {}),
@@ -711,6 +727,8 @@ export async function saveMockupState(page, userId, state, options = {}) {
           sipFrequency: row.freq || 'Monthly',
           sipExpiryDate: row.exp || '',
           expectedReturn: num(row.ret),
+          maturityDate: row.mat || '',
+          maturityValue: num(row.mval),
           notes: row.notes || '',
           cat: row.cat || 'Other',
           goalEarmarks: (row.tag || '') === 'Personal' ? [] : asGoalEarmarks(row.earmarks),

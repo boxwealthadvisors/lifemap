@@ -27,6 +27,13 @@
 .lm-topbar {
   background: #fff;
   position: relative;
+  z-index: 90;
+}
+
+/* Account / radix menus must sit above the sticky section bar (.lm-tier2wrap is 80). */
+[data-slot="dropdown-menu-content"],
+[data-radix-popper-content-wrapper] {
+  z-index: 300 !important;
 }
 
 .lm-topbar::before {

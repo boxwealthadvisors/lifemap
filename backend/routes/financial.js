@@ -69,14 +69,22 @@ const asJson = (value) => {
 
 const sameUser = (a, b) => Number(a) === Number(b);
 
+// Numeric columns reject '' from the register, so blank cells must land as NULL.
+const numOrNull = (value) => {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
 const insertAssetRow = async ({ userId, profileId, name, tag, currentValue, customData, extras }) => {
   const json = asJson(customData);
   try {
     return await pool.query(
       `INSERT INTO assets (
          user_id, profile_id, name, tag, current_value, custom_data,
-         category, sip_amount, sip_frequency, sip_expiry_date, expected_return, notes
-       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12) RETURNING *`,
+         category, sip_amount, sip_frequency, sip_expiry_date, expected_return,
+         maturity_date, maturity_value, notes
+       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
       [
         userId,
         profileId,
@@ -89,6 +97,8 @@ const insertAssetRow = async ({ userId, profileId, name, tag, currentValue, cust
         extras.sip_frequency || 'Monthly',
         extras.sip_expiry_date || null,
         extras.expected_return ?? null,
+        extras.maturity_date || null,
+        numOrNull(extras.maturity_value),
         extras.notes || null,
       ]
     );
@@ -1512,6 +1522,8 @@ router.post('/asset', [
         sip_frequency: req.body.sip_frequency,
         sip_expiry_date: req.body.sip_expiry_date,
         expected_return: req.body.expected_return,
+        maturity_date: req.body.maturity_date,
+        maturity_value: req.body.maturity_value,
         notes: req.body.notes,
       },
     });
@@ -1626,11 +1638,12 @@ router.put('/asset/:assetId', [
       values.push(asJson(custom_data));
       paramCount++;
     }
-    const extraAssetFields = ['category', 'sip_amount', 'sip_frequency', 'sip_expiry_date', 'expected_return', 'notes'];
+    const extraAssetFields = ['category', 'sip_amount', 'sip_frequency', 'sip_expiry_date', 'expected_return', 'maturity_date', 'maturity_value', 'notes'];
+    const numericAssetFields = new Set(['sip_amount', 'expected_return', 'maturity_value']);
     extraAssetFields.forEach((key) => {
       if (req.body[key] !== undefined) {
         updates.push(`${key} = $${paramCount}`);
-        values.push(req.body[key]);
+        values.push(numericAssetFields.has(key) ? numOrNull(req.body[key]) : req.body[key]);
         paramCount++;
       }
     });

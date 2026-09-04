@@ -93,6 +93,27 @@ export function splitAssets(assets) {
   return { financial, personal, total: financial + personal }
 }
 
+/* A contracted maturity value is a known future inflow rather than a projection, so the
+   FP engine needs the calendar year it lands in, today's value, and the promised amount.
+   Rows with a maturity date but no contracted amount are left out: compounding them at the
+   plan's blended return through maturity is already the right assumption. */
+export function assetMaturityRows(assets) {
+  const now = new Date().getFullYear()
+  return asList(assets, 'assets')
+    .filter((a) => (a.tag || '') !== 'Personal')
+    .map((a) => {
+      const cd = a.custom_data || {}
+      const raw = a.maturity_date ?? cd.maturityDate
+      const promised = num(a.maturity_value ?? cd.maturityValue)
+      if (!raw || promised <= 0) return null
+      const iso = String(raw).match(/^(\d{4})-\d{2}-\d{2}/)
+      const year = iso ? Number(iso[1]) : new Date(raw).getFullYear()
+      if (!Number.isFinite(year)) return null
+      return { y: year - now, v: num(a.current_value ?? a.val), mval: promised }
+    })
+    .filter(Boolean)
+}
+
 export function workAnnual(list) {
   return asList(list, 'workAssets', 'assets', 'data')
     .reduce((s, row) => s + num(row.amount ?? row.amt), 0)

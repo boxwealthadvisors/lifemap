@@ -1023,11 +1023,9 @@ function drawTable(){
       <td><button type="button" class="earcell" data-ear="income"><span class="k">Income</span>${earmarkChips(g.incomeLinks)}</button></td>
       <td><input class="cell" data-k="notes" value="${esc(g.notes)}" placeholder="Click to add" style="min-width:160px"></td>
       <td><span class="acts">
-        <button class="rb save${g.saved?" done":""}" type="button">${g.saved?"Saved":"Save"}</button>
         <button class="rb del" type="button">Remove</button></span></td>`;
 
-    const btnSave = tr.querySelector(".save");
-    const dirty = () => { g.saved = false; btnSave.classList.remove("done"); btnSave.textContent = "Save"; };
+    const dirty = () => { g.saved = false; };
 
     tr.querySelectorAll("input[data-k]").forEach(el => {
       el.addEventListener("input", e => {
@@ -1051,7 +1049,6 @@ function drawTable(){
     tr.querySelector('[data-k="flex"]').addEventListener("click", e => {
       ddToggle(e.currentTarget, TAGS.map(t => ({n:t.n, c:t.c})), g.flex, v => { g.flex = v; dirty(); refresh(); });
     });
-    btnSave.addEventListener("click", () => { g.saved = true; btnSave.classList.add("done"); btnSave.textContent = "Saved"; });
     tr.querySelector(".del").addEventListener("click", () => { ROWS.splice(i,1); refresh(); });
     tb.appendChild(tr);
   });
@@ -1366,7 +1363,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
   function getState(){
     try {
       if (PAGE === "fp") {
-        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
+        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, assetMaturities:(S.assetMaturities||[]).slice(), loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
       }
       if (PAGE === "assets") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, MODE: MODE, HZ: HZ, GOALS: (typeof GOALS !== "undefined" ? GOALS.slice() : []) };
       if (PAGE === "work") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, AGE: AGE };
@@ -1397,6 +1394,10 @@ document.querySelectorAll(".pmore").forEach(btn => {
     if (src.household) {
       if (!S.household) S.household = [];
       replaceList(S.household, src.household);
+    }
+    if (src.assetMaturities) {
+      if (!S.assetMaturities) S.assetMaturities = [];
+      replaceList(S.assetMaturities, src.assetMaturities);
     }
     if (typeof renderFamily === "function") renderFamily();
     var set = function(id, val){ var el = $(id); if (el) el.value = val; };
@@ -1515,7 +1516,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
     if (document.getElementById("lm-acct-css")) return;
     var s = document.createElement("style");
     s.id = "lm-acct-css";
-    s.textContent = ".topbar{z-index:90}.lm-acct{position:relative;display:inline-flex;align-items:center;z-index:91}.lm-acct.open{z-index:120}.lm-acct .tlink{display:inline-flex!important;align-items:center;gap:4px;cursor:pointer}.lm-acct-menu{display:none;position:absolute;right:0;top:calc(100% + 6px);min-width:188px;background:#fff;border:1px solid #dbe2ea;border-radius:10px;box-shadow:0 12px 28px rgba(10,31,68,.16);padding:6px;z-index:200}.lm-acct.open .lm-acct-menu{display:block}.lm-acct-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:10px 12px;border-radius:8px;font:inherit;font-size:14px;font-weight:600;color:#003c8f;cursor:pointer}.lm-acct-menu button:hover{background:#eef3fa}.lm-acct-menu button.out{color:#b42318}";
+    s.textContent = ".topbar{position:relative;z-index:120}.lm-acct{position:relative;display:inline-flex;align-items:center;z-index:121}.lm-acct.open{z-index:130}.lm-acct .tlink{display:inline-flex!important;align-items:center;gap:4px;cursor:pointer}.lm-acct-menu{display:none;position:absolute;right:0;top:calc(100% + 6px);min-width:188px;background:#fff;border:1px solid #dbe2ea;border-radius:10px;box-shadow:0 12px 28px rgba(10,31,68,.16);padding:6px;z-index:250}.lm-acct.open .lm-acct-menu{display:block}.lm-acct-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:10px 12px;border-radius:8px;font:inherit;font-size:14px;font-weight:600;color:#003c8f;cursor:pointer}.lm-acct-menu button:hover{background:#eef3fa}.lm-acct-menu button.out{color:#b42318}";
     document.head.appendChild(s);
   }
 
@@ -1604,9 +1605,13 @@ document.querySelectorAll(".pmore").forEach(btn => {
   document.addEventListener("click", function(e){
     var saveBtn = e.target.closest && e.target.closest(".rb.save");
     var delBtn = e.target.closest && e.target.closest(".rb.del");
+    var ddOpt = e.target.closest && e.target.closest(".ddopt");
     if (saveBtn && saveBtn.id === "ear-add") return;
     if (saveBtn || delBtn) {
       setTimeout(function(){ post(delBtn ? "row-delete" : "row-save", getState()); }, 30);
+    }
+    if (ddOpt) {
+      setTimeout(function(){ post("row-save", getState()); }, 40);
     }
   }, true);
 

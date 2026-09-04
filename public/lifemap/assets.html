@@ -111,7 +111,8 @@ a{text-decoration:none; color:inherit}
 .dcenter{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; pointer-events:none}
 .dcenter .k{font-size:10px; letter-spacing:.15em; text-transform:uppercase; color:var(--muted); font-weight:700}
 .dcenter .v{font-size:28px; line-height:1.1; margin-top:3px; font-weight:800; letter-spacing:-.03em; color:var(--navy)}
-.dcenter .s{font-size:11.5px; color:var(--muted); margin-top:3px; max-width:145px; line-height:1.35}
+.dcenter .s{font-family:var(--font); font-size:13px; font-weight:600; color:#5a6e8c;
+  margin-top:6px; max-width:168px; line-height:1.4; letter-spacing:-.01em}
 .dtip{position:absolute; z-index:30; pointer-events:none; opacity:0; transition:opacity .12s;
   background:var(--ink); color:#fff; border-radius:10px; padding:10px 13px; min-width:158px;
   box-shadow:0 12px 32px rgba(10,31,68,.34); transform:translate(-50%,-116%)}
@@ -189,6 +190,9 @@ td.rt{text-align:right}
 .cell.name{font-weight:600; min-width:170px}
 .cell.money{text-align:right; font-variant-numeric:tabular-nums; min-width:118px}
 .cell.small{min-width:96px}
+/* a return solved from a contracted maturity value, not typed by hand */
+.cell.derived{color:var(--slate); font-style:italic; cursor:help}
+.cell.derived:hover{background:transparent}
 .tagpick{min-width:138px}
 .catpick{min-width:190px}
 .freqpick{min-width:118px}
@@ -359,7 +363,7 @@ td.rt{text-align:right}
   <div class="phead">
     <h1>What you own
       <button class="pmore" type="button" aria-expanded="false" aria-controls="phead-desc" aria-label="Show what this page is for"></button></h1>
-    <div class="pdesc" id="phead-desc"><p>Every holding, in one register &mdash; investments, retirement, emergency and personal assets such as a home or gold. Filter by Personal, or use + Add personal asset. The mix and the growth path below rebuild themselves as you add rows, and choosing a category fills in a historical return you can then override.</p></div>
+    <div class="pdesc" id="phead-desc"><p>Every holding, in one register &mdash; investments, retirement, emergency and personal assets such as a home or gold. Use + Add personal asset to start a row already tagged Personal; it stays in the same list so you can fill investments and personal assets together. The mix and the growth path below rebuild themselves as you add rows, and choosing a category fills in a historical return you can then override.</p></div>
   </div>
 
   <!-- ===== asset mix ===== -->
@@ -444,6 +448,8 @@ td.rt{text-align:right}
             <th style="text-align:right">SIP amount</th>
             <th>SIP frequency</th>
             <th>SIP expiry</th>
+            <th>Maturity date</th>
+            <th style="text-align:right">Maturity value</th>
             <th style="text-align:right">Value in 10 yrs</th>
             <th>Earmarked to</th>
             <th>Notes</th>
@@ -459,7 +465,7 @@ td.rt{text-align:right}
       <button class="addrow" id="btn-add-personal2">+ Add personal asset</button>
     </div>
     <div class="foot">
-      Expected returns are long-run historical averages for each asset class, filled in as a starting point and fully editable. They are not forecasts, and your own holdings may behave very differently. &ldquo;Value in 10 years&rdquo; compounds the current value at that rate and adds SIP contributions until the expiry date you set.
+      Expected returns are long-run historical averages for each asset class, filled in as a starting point and fully editable. They are not forecasts, and your own holdings may behave very differently. &ldquo;Value in 10 years&rdquo; compounds the current value at that rate and adds SIP contributions until the expiry date you set. Set a maturity date for anything that ends on a known day &mdash; an FD, PPF, NPS, or an endowment policy &mdash; and the row stops compounding there instead of growing forever; the proceeds simply sit as cash until a goal spends them. If the payout is contractually fixed, type it into maturity value and the expected return becomes the rate that amount implies.
     </div>
   </div>
 
@@ -513,7 +519,7 @@ let ROWS = [
   {name:"HDFC Flexi Cap",        cat:"Equity mutual funds",   tag:"Investment", val:1200000, sip:15000, freq:"Monthly", exp:"2035-03-31", ret:12.0, notes:"Core equity holding", saved:true},
   {name:"SBI Corporate Bond",    cat:"Debt mutual funds",     tag:"Investment", val:450000,  sip:0,     freq:"Monthly", exp:"",           ret:7.0,  notes:"", saved:true},
   {name:"Flat, Sector 62 Noida", cat:"Real estate",           tag:"Personal",   val:4200000, sip:0,     freq:"Monthly", exp:"",           ret:8.0,  notes:"Self-occupied", saved:true},
-  {name:"PPF account",           cat:"PPF / EPF",             tag:"Retirement", val:680000,  sip:12500, freq:"Monthly", exp:"2040-03-31", ret:7.1,  notes:"Matures 2040", saved:true},
+  {name:"PPF account",           cat:"PPF / EPF",             tag:"Retirement", val:680000,  sip:12500, freq:"Monthly", exp:"2040-03-31", ret:7.1,  mat:"2040-03-31", notes:"", saved:true},
   {name:"Gold and SGB",          cat:"Gold / SGB",            tag:"Personal",   val:320000,  sip:0,     freq:"Yearly",  exp:"",           ret:9.0,  notes:"", saved:true},
   {name:"Emergency FD",          cat:"Fixed deposits",        tag:"Emergency",  val:250000,  sip:0,     freq:"Monthly", exp:"",           ret:6.5,  notes:"3 months of expenses", saved:true}
 ];
@@ -547,17 +553,66 @@ function sipYears(r, cap){
   const y = (new Date(r.exp) - new Date()) / (365.25*24*3600*1000);
   return Math.max(0, Math.min(cap, y));
 }
-/* value of one row at each year 0..years */
-function pathOf(r, years){
-  const g = num(r.ret)/100, per = PER_YEAR[r.freq] || 0;
+const RET_DERIVED_HINT = "Solved from the maturity value you entered. Clear that cell to set a return by hand.";
+/* years from today to the maturity date; Infinity when the row never matures */
+function maturityYears(r){
+  if(!r.mat) return Infinity;
+  const y = (new Date(r.mat) - new Date()) / (365.25*24*3600*1000);
+  if(!isFinite(y)) return Infinity;
+  /* a date within a week of a whole year belongs on that year of the chart grid,
+     otherwise a 10-year policy measures as 10.0027 years and matures in year 11 */
+  const whole = Math.round(y);
+  return Math.max(0, Math.abs(y - whole) < 0.02 ? whole : y);
+}
+/* compound the row forward, ignoring any contracted maturity value */
+function grownPath(r, years, rate){
+  const g = num(rate)/100, per = PER_YEAR[r.freq] || 0;
   const annual = num(r.sip) * per;
   const run = sipYears(r, years);
+  const mat = maturityYears(r);
   const out = [num(r.val)];
   let v = num(r.val);
-  for(let t=0; t<years; t++){ v = v*(1+g) + (t < run ? annual : 0); out.push(v); }
+  for(let t=0; t<years; t++){
+    /* past maturity the proceeds are cash: they stop compounding, they do not vanish */
+    if(t >= mat){ out.push(v); continue; }
+    const step = Math.min(1, mat - t);
+    v = v*Math.pow(1+g, step) + (t < run ? annual : 0);
+    out.push(v);
+  }
+  return out;
+}
+/* value of one row at each year 0..years */
+function pathOf(r, years){
+  const out = grownPath(r, years, r.ret);
+  const mat = maturityYears(r), target = num(r.mval);
+  if(!isFinite(mat) || target <= 0) return out;
+  /* a guaranteed payout is a fact, not a projection: pin the curve to it from maturity on */
+  for(let y = Math.ceil(mat); y <= years; y++) out[y] = target;
   return out;
 }
 const futureValue = (r, years) => pathOf(r, years)[years];
+/* the return a contracted maturity value implies, given the money actually going in */
+function impliedReturn(r){
+  const mat = maturityYears(r), target = num(r.mval);
+  if(!isFinite(mat) || mat <= 0 || target <= 0) return null;
+  const years = Math.ceil(mat);
+  const at = rate => grownPath(r, years, rate)[years];
+  if(!(at(0) > 0)) return null;          /* nothing invested: no return to infer */
+  let lo = -90, hi = 200;
+  if(at(lo) > target || at(hi) < target) return null;
+  for(let i=0; i<80; i++){
+    const mid = (lo+hi)/2;
+    if(at(mid) < target) lo = mid; else hi = mid;
+  }
+  return Math.round(((lo+hi)/2) * 100) / 100;
+}
+/* keep the return cell in step with a hand-entered maturity value */
+function syncImpliedReturn(r){
+  const implied = impliedReturn(r);
+  if(implied != null) r.ret = implied;
+  return implied;
+}
+const returnIsDerived = r => isFinite(maturityYears(r)) && num(r.mval) > 0;
 const monthlySip = () => ROWS.reduce((t,r) => t + (num(r.sip) * (PER_YEAR[r.freq]||0) / 12), 0);
 function projectionHtml(r){
   const fv = futureValue(r, 10);
@@ -1000,6 +1055,10 @@ function drawTable(){
   rows.forEach(({r,i}, vi) => {
     const tr = document.createElement("tr");
     const cat = catOf(r.cat), tag = tagOf(r.tag);
+    const retLocked = returnIsDerived(r);
+    /* re-solve on every draw so a row loaded from the database can never show a rate
+       that disagrees with its own maturity value */
+    if(retLocked) syncImpliedReturn(r);
     tr.innerHTML = `
       <td class="stick"><input class="cell name" data-k="name" value="${esc(r.name)}" placeholder="Name this asset"></td>
       <td><button type="button" class="dd catpick" data-dd="cat" aria-haspopup="listbox" aria-expanded="false">
@@ -1007,28 +1066,40 @@ function drawTable(){
       <td><button type="button" class="dd tagpick" data-dd="tag" aria-haspopup="listbox" aria-expanded="false">
             <span class="sw" style="background:${tag.c}"></span><span class="lbl">${esc(tag.n)}</span></button></td>
       <td><input class="cell money" data-k="val" type="text" inputmode="decimal" value="${r.val}" placeholder="0"></td>
-      <td><input class="cell money" data-k="ret" type="text" inputmode="decimal" value="${pctStr(r.ret)}"></td>
+      <td><input class="cell money${retLocked ? " derived" : ""}" data-k="ret" type="text" inputmode="decimal" value="${pctStr(r.ret)}"${retLocked ? ` readonly title="${RET_DERIVED_HINT}"` : ""}></td>
       <td><input class="cell money" data-k="sip" type="text" inputmode="decimal" value="${r.sip}" placeholder="0"></td>
       <td><button type="button" class="dd freqpick" data-dd="freq" aria-haspopup="listbox" aria-expanded="false">
             <span class="lbl">${esc(r.freq)}</span></button></td>
       <td><input class="cell small" data-k="exp" type="date" value="${r.exp}"></td>
+      <td><input class="cell small" data-k="mat" type="date" value="${r.mat || ""}"></td>
+      <td><input class="cell money" data-k="mval" type="text" inputmode="decimal" value="${num(r.mval) > 0 ? r.mval : ""}" placeholder="0"></td>
       <td class="rt"><span class="proj">${projectionHtml(r)}</span></td>
       <td>${tag.n === "Personal"
         ? `<span class="ph">Not used for goals</span>`
         : `<button type="button" class="earcell" data-ear="1">${earmarkChips(r.earmarks)}</button>`}</td>
       <td><input class="cell" data-k="notes" value="${esc(r.notes||"")}" placeholder="Click to add" style="min-width:150px"></td>
       <td><span class="acts">
-        <button class="rb save${r.saved?" done":""}" type="button">${r.saved?"Saved":"Save"}</button>
         <button class="rb del" type="button">Remove</button></span></td>`;
 
-    const btnSave = tr.querySelector(".save");
-    const dirty = () => { r.saved = false; btnSave.classList.remove("done"); btnSave.textContent = "Save"; };
+    const dirty = () => { r.saved = false; };
+    /* repaint the return cell in place so typing a maturity value never steals focus */
+    const paintRet = () => {
+      const el = tr.querySelector('[data-k="ret"]');
+      if(!el) return;
+      const locked = returnIsDerived(r);
+      el.value = pctStr(r.ret);
+      el.readOnly = locked;
+      el.classList.toggle("derived", locked);
+      if(locked) el.title = RET_DERIVED_HINT; else el.removeAttribute("title");
+    };
 
     tr.querySelectorAll("[data-k]").forEach(el => {
       el.addEventListener("input", e => {
         const k = e.target.dataset.k;
-        r[k] = ["val","sip","ret"].includes(k) ? num(e.target.value) : e.target.value;
+        r[k] = ["val","sip","ret","mval"].includes(k) ? num(e.target.value) : e.target.value;
         dirty();
+        /* current value, SIP and maturity all feed the implied rate, so re-solve on any of them */
+        if(k === "mat" || k === "mval" || returnIsDerived(r)){ syncImpliedReturn(r); paintRet(); }
         const proj = tr.querySelector(".proj");
         if(proj) proj.innerHTML = projectionHtml(r);
         refresh(false);
@@ -1046,15 +1117,15 @@ function drawTable(){
       btn.addEventListener("click", () => ddToggle(btn, opts, r[k], v => {
         if(v === r[k]) return;
         r[k] = v; dirty();
-        /* choosing a category drops in that class's historical return */
-        if(k === "cat") r.ret = catOf(r.cat).ret;
+        /* choosing a category drops in that class's historical return, unless a maturity value fixes it */
+        if(k === "cat" && !returnIsDerived(r)) r.ret = catOf(r.cat).ret;
+        if(k === "freq") syncImpliedReturn(r);
         if(k === "tag" && v === "Personal") r.earmarks = [];
         refresh();
         const back = $("tbody").children[vi];
         if(back) back.querySelector(`[data-dd="${k}"]`).focus();
       }));
     });
-    btnSave.addEventListener("click", () => { r.saved = true; btnSave.classList.add("done"); btnSave.textContent = "Saved"; });
     tr.querySelector(".del").addEventListener("click", () => { ROWS.splice(i,1); refresh(); });
     tb.appendChild(tr);
   });
@@ -1079,9 +1150,12 @@ const addAsset = (tag) => {
   const purpose = tag || "Investment";
   const cat = purpose === "Personal" ? "Other" : "Equity mutual funds";
   ROWS.push({id:"temp_"+Date.now(), name:"", cat, tag: purpose, val:0, sip:0,
-             freq:"Monthly", exp:"", ret:catOf(cat).ret, notes:"", earmarks:[], saved:false});
+             freq:"Monthly", exp:"", ret:catOf(cat).ret, mat:"", mval:0,
+             notes:"", earmarks:[], saved:false});
   SEARCH = ""; $("search").value = "";
-  setFilter(purpose === "Personal" ? "Personal" : "All purposes");
+  /* Keep investments and personal assets in the same list. Only drop a purpose
+     filter if it would hide the row we just added. */
+  if(FILTER && FILTER !== purpose) setFilter("All purposes");
   refresh();
   const last = $("tbody").lastElementChild;
   if(last) last.querySelector("input").focus();
@@ -1106,10 +1180,10 @@ $("btn-reset").addEventListener("click", () => {
   SEARCH = ""; $("search").value = ""; setFilter("All purposes");
 });
 $("btn-csv").addEventListener("click", () => {
-  const head = ["Name","Category","Purpose","Current value","Expected return %","SIP amount","SIP frequency","SIP expiry","Value in 10 yrs","Earmarked to","Notes"];
+  const head = ["Name","Category","Purpose","Current value","Expected return %","SIP amount","SIP frequency","SIP expiry","Maturity date","Maturity value","Value in 10 yrs","Earmarked to","Notes"];
   const q = v => `"${String(v??"").replace(/"/g,'""')}"`;
   const csv = [head.map(q).join(",")].concat(
-    ROWS.map(r => [r.name,r.cat,r.tag,r.val,r.ret,r.sip,r.freq,r.exp,Math.round(futureValue(r,10)),(r.earmarks||[]).map(e => e.name+" "+e.pct+"%").join("; "),r.notes].map(q).join(","))
+    ROWS.map(r => [r.name,r.cat,r.tag,r.val,r.ret,r.sip,r.freq,r.exp,r.mat||"",num(r.mval)>0?r.mval:"",Math.round(futureValue(r,10)),(r.earmarks||[]).map(e => e.name+" "+e.pct+"%").join("; "),r.notes].map(q).join(","))
   ).join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
@@ -1244,6 +1318,20 @@ function parsePctCell(v){
   const n = num(s);
   return n > 0 && n <= 1 ? Math.round(n * 1000) / 10 : Math.round(n * 10) / 10;
 }
+/* Excel hands dates over as serial numbers; CSV hands them over as text */
+function parseDateCell(v){
+  if (v == null || v === "") return "";
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = Number(s);
+    if (serial > 0 && serial < 100000) {
+      return new Date(Date.UTC(1899, 11, 30) + serial * 86400000).toISOString().slice(0, 10);
+    }
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
 function keyHead(h){
   return String(h || "").trim().toLowerCase().replace(/[%.]/g, " ").replace(/\s+/g, " ");
 }
@@ -1268,21 +1356,25 @@ function matchTagName(v){
 function rowsFromTable(table){
   if (!table.length) return [];
   const heads = table[0].map(keyHead);
+  /* one sheet column feeds one field, so the loose aliases below cannot poach a specific column */
+  const taken = new Set();
   const idx = (aliases) => {
     for (const a of aliases) {
-      const i = heads.findIndex(h => h === a || h.includes(a));
-      if (i >= 0) return i;
+      const i = heads.findIndex((h, n) => !taken.has(n) && (h === a || h.includes(a)));
+      if (i >= 0) { taken.add(i); return i; }
     }
     return -1;
   };
   const iName = idx(["name", "asset", "holding"]);
   const iCat = idx(["category", "asset class", "class"]);
   const iTag = idx(["purpose", "tag"]);
-  const iVal = idx(["current value", "market value", "value", "amount"]);
-  const iRet = idx(["expected return", "return", "growth"]);
+  const iMat = idx(["maturity date", "matures on", "matures", "maturity"]);
+  const iMval = idx(["maturity value", "maturity amount", "payout", "sum assured"]);
   const iSip = idx(["sip amount", "sip"]);
   const iFreq = idx(["sip frequency", "frequency"]);
   const iExp = idx(["sip expiry", "expiry"]);
+  const iRet = idx(["expected return", "return", "growth"]);
+  const iVal = idx(["current value", "market value", "value", "amount"]);
   const iNotes = idx(["notes", "note", "remark"]);
   const out = [];
   table.slice(1).forEach(cells => {
@@ -1293,7 +1385,7 @@ function rowsFromTable(table){
     const tag = matchTagName(iTag >= 0 ? cells[iTag] : "Investment");
     const freqRaw = iFreq >= 0 ? String(cells[iFreq] || "Monthly").trim() : "Monthly";
     const freq = FREQ.find(f => f.toLowerCase() === freqRaw.toLowerCase()) || "Monthly";
-    out.push({
+    const row = {
       id: "temp_" + Date.now() + "_" + out.length,
       name: name || "Imported asset",
       cat,
@@ -1301,12 +1393,16 @@ function rowsFromTable(table){
       val,
       sip: parseMoneyCell(iSip >= 0 ? cells[iSip] : ""),
       freq,
-      exp: iExp >= 0 ? String(cells[iExp] || "").trim() : "",
+      exp: parseDateCell(iExp >= 0 ? cells[iExp] : ""),
       ret: parsePctCell(iRet >= 0 ? cells[iRet] : catOf(cat).ret),
+      mat: parseDateCell(iMat >= 0 ? cells[iMat] : ""),
+      mval: parseMoneyCell(iMval >= 0 ? cells[iMval] : ""),
       notes: iNotes >= 0 ? String(cells[iNotes] || "").trim() : "",
       earmarks: tag === "Personal" ? [] : [],
       saved: false
-    });
+    };
+    syncImpliedReturn(row);
+    out.push(row);
   });
   return out;
 }
@@ -1329,7 +1425,7 @@ async function importAssetFile(file){
   }
   const incoming = rowsFromTable(table);
   if (!incoming.length) {
-    alert("No asset rows found. Use columns like Name, Category, Purpose, Current value, Expected return %.");
+    alert("No asset rows found. Use columns like Name, Category, Purpose, Current value, Expected return %. Maturity date and Maturity value are optional.");
     return;
   }
   incoming.forEach(r => ROWS.push(r));
@@ -1507,7 +1603,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
   function getState(){
     try {
       if (PAGE === "fp") {
-        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
+        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, assetMaturities:(S.assetMaturities||[]).slice(), loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
       }
       if (PAGE === "assets") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, MODE: MODE, HZ: HZ, GOALS: (typeof GOALS !== "undefined" ? GOALS.slice() : []) };
       if (PAGE === "work") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, AGE: AGE };
@@ -1538,6 +1634,10 @@ document.querySelectorAll(".pmore").forEach(btn => {
     if (src.household) {
       if (!S.household) S.household = [];
       replaceList(S.household, src.household);
+    }
+    if (src.assetMaturities) {
+      if (!S.assetMaturities) S.assetMaturities = [];
+      replaceList(S.assetMaturities, src.assetMaturities);
     }
     if (typeof renderFamily === "function") renderFamily();
     var set = function(id, val){ var el = $(id); if (el) el.value = val; };
@@ -1656,7 +1756,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
     if (document.getElementById("lm-acct-css")) return;
     var s = document.createElement("style");
     s.id = "lm-acct-css";
-    s.textContent = ".topbar{z-index:90}.lm-acct{position:relative;display:inline-flex;align-items:center;z-index:91}.lm-acct.open{z-index:120}.lm-acct .tlink{display:inline-flex!important;align-items:center;gap:4px;cursor:pointer}.lm-acct-menu{display:none;position:absolute;right:0;top:calc(100% + 6px);min-width:188px;background:#fff;border:1px solid #dbe2ea;border-radius:10px;box-shadow:0 12px 28px rgba(10,31,68,.16);padding:6px;z-index:200}.lm-acct.open .lm-acct-menu{display:block}.lm-acct-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:10px 12px;border-radius:8px;font:inherit;font-size:14px;font-weight:600;color:#003c8f;cursor:pointer}.lm-acct-menu button:hover{background:#eef3fa}.lm-acct-menu button.out{color:#b42318}";
+    s.textContent = ".topbar{position:relative;z-index:120}.lm-acct{position:relative;display:inline-flex;align-items:center;z-index:121}.lm-acct.open{z-index:130}.lm-acct .tlink{display:inline-flex!important;align-items:center;gap:4px;cursor:pointer}.lm-acct-menu{display:none;position:absolute;right:0;top:calc(100% + 6px);min-width:188px;background:#fff;border:1px solid #dbe2ea;border-radius:10px;box-shadow:0 12px 28px rgba(10,31,68,.16);padding:6px;z-index:250}.lm-acct.open .lm-acct-menu{display:block}.lm-acct-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:10px 12px;border-radius:8px;font:inherit;font-size:14px;font-weight:600;color:#003c8f;cursor:pointer}.lm-acct-menu button:hover{background:#eef3fa}.lm-acct-menu button.out{color:#b42318}";
     document.head.appendChild(s);
   }
 
@@ -1745,9 +1845,13 @@ document.querySelectorAll(".pmore").forEach(btn => {
   document.addEventListener("click", function(e){
     var saveBtn = e.target.closest && e.target.closest(".rb.save");
     var delBtn = e.target.closest && e.target.closest(".rb.del");
+    var ddOpt = e.target.closest && e.target.closest(".ddopt");
     if (saveBtn && saveBtn.id === "ear-add") return;
     if (saveBtn || delBtn) {
       setTimeout(function(){ post(delBtn ? "row-delete" : "row-save", getState()); }, 30);
+    }
+    if (ddOpt) {
+      setTimeout(function(){ post("row-save", getState()); }, 40);
     }
   }, true);
 

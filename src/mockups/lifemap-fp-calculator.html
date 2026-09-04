@@ -748,7 +748,7 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
     <span style="margin-left:auto"><a href="#">Terms</a> &nbsp;&middot;&nbsp; <a href="#">Privacy</a> &nbsp;&middot;&nbsp; <a href="#">Talk to an advisor</a></span>
   </div>
   <div class="disclaimer">
-    LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It uses salary, work-asset streams and family-member income, each with its own growth rate and end age; personal assets are not sold to fund the plan; loan instalments repay the balance without interest; and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
+    LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It uses salary, work-asset streams and family-member income, each with its own growth rate and end age; personal assets are not sold to fund the plan; a holding you gave a contracted maturity value pays exactly that amount on its maturity date rather than the assumed return, and the proceeds are then reinvested with the rest; loan instalments repay the balance without interest; and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
   </div>
 </footer>
 
@@ -780,6 +780,9 @@ const S = {
   ],
   work:[],
   household:[],
+  /* Holdings whose payout is contractual, from the Assets register:
+     {y: years from now to maturity, v: value today, mval: promised amount} */
+  assetMaturities:[],
   gRet:11, gInf:6, lifeTo:85
 };
 
@@ -872,6 +875,19 @@ function livingAt(t, gI){
 function loanYears(){
   return S.loans.map(l => { const a = num(l.emi)*12; return a>0 ? Math.ceil(num(l.v)/a) : 0; });
 }
+/* A holding with a contracted payout stops being a projection on its maturity date.
+   The plan receives the difference between the promise and what the blended return
+   would have made of that holding by then, which is negative for a policy that
+   guarantees less than the portfolio assumption. Everything else is untouched. */
+function maturityAdjust(gR, N){
+  const adj = new Array(N+1).fill(0);
+  (S.assetMaturities || []).forEach(m => {
+    const y = Math.round(num(m.y)), promised = num(m.mval);
+    if(promised <= 0 || !(y >= 0) || y > N) return;
+    adj[y] += promised - num(m.v)*Math.pow(1+gR, y);
+  });
+  return adj;
+}
 function engine(o){
   o = o || {};
   const gS = (o.gSal ?? S.gSal)/100, gR = (o.gRet ?? S.gRet)/100, gI = (o.gInf ?? S.gInf)/100;
@@ -899,17 +915,18 @@ function engine(o){
   for(let t=N-1;t>=0;t--) req[t] = cost(t) + req[t+1]/(1+gR);
 
   /* Actual projected pool: salary, work streams and household income keep arriving on their own schedules. */
-  const pool = [num(S.finAssets)];
+  const matAdj = maturityAdjust(gR, N);
+  const pool = [num(S.finAssets) + matAdj[0]];
   for(let t=0;t<N;t++){
     const sal = salFull[t];
-    pool.push((pool[t] + sal - cost(t))*(1+gR));
+    pool.push((pool[t] + sal - cost(t))*(1+gR) + matAdj[t+1]);
   }
 
   /* Independent check that the pool at age t survives with salary set to zero from then. */
   const survivesWithoutSalary = (start,t0) => {
     let p = start;
     for(let k=t0;k<N;k++){
-      p = (p - cost(k))*(1+gR);
+      p = (p - cost(k))*(1+gR) + matAdj[k+1];
       if(p < -1) return false;
     }
     return p >= -1;

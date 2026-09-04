@@ -191,7 +191,7 @@ export default function Shell({ children, adminMode = false, activeSection, onSe
                     <ChevronDown className="h-4 w-4" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuContent align="end" className="w-56 z-[300]">
                   <DropdownMenuItem asChild>
                     <Link to="/profile" className="flex items-center gap-2 cursor-pointer">
                       <UserCircle className="h-4 w-4" />

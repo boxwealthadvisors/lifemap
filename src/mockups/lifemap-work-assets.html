@@ -118,7 +118,8 @@ a{text-decoration:none; color:inherit}
 .dcenter{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; pointer-events:none}
 .dcenter .k{font-size:10px; letter-spacing:.15em; text-transform:uppercase; color:var(--muted); font-weight:700}
 .dcenter .v{font-size:28px; line-height:1.1; margin-top:3px; font-weight:800; letter-spacing:-.03em; color:var(--navy)}
-.dcenter .s{font-size:11.5px; color:var(--muted); margin-top:3px; max-width:145px; line-height:1.35}
+.dcenter .s{font-family:var(--font); font-size:13px; font-weight:600; color:#5a6e8c;
+  margin-top:6px; max-width:168px; line-height:1.4; letter-spacing:-.01em}
 .dtip{position:absolute; z-index:30; pointer-events:none; opacity:0; transition:opacity .12s;
   background:var(--ink); color:#fff; border-radius:10px; padding:10px 13px; min-width:158px;
   box-shadow:0 12px 32px rgba(10,31,68,.34); transform:translate(-50%,-116%)}
@@ -733,12 +734,10 @@ function drawTable(){
       <td class="rt"><span class="proj${yrs?"":" done"}">${fmt(val)}<small>${yrs ? yrs + (yrs===1?" more year":" more years") : "already ended"}</small></span></td>
       <td><input class="cell" data-k="notes" value="${esc(r.notes||"")}" placeholder="Click to add" style="min-width:150px"></td>
       <td><span class="acts">
-        <button class="rb save${r.saved?" done":""}" type="button">${r.saved?"Saved":"Save"}</button>
         <button class="rb del" type="button">Remove</button></span></td>`;
 
-    const btnSave = tr.querySelector(".save");
     const projected = tr.querySelector(".proj");
-    const dirty = () => { r.saved = false; btnSave.classList.remove("done"); btnSave.textContent = "Save"; };
+    const dirty = () => { r.saved = false; };
 
     /* Keep the calculated total in this row live while the user types.
        Redrawing the entire table would replace the focused input, so update
@@ -760,7 +759,6 @@ function drawTable(){
     });
 
 
-    btnSave.addEventListener("click", () => { r.saved = true; btnSave.classList.add("done"); btnSave.textContent = "Saved"; });
     tr.querySelector(".del").addEventListener("click", () => { ROWS.splice(i,1); refresh(); });
     tb.appendChild(tr);
   });
