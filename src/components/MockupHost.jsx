@@ -32,6 +32,7 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
 
   const api = () => iframeRef.current?.contentWindow?.__LIFEMAP__
   const syncOpts = isAdminMode ? { admin: true } : {}
+  const hydrateRef = useRef(null)
 
   const hydrate = useCallback(async (userId) => {
     const bridge = api()
@@ -44,7 +45,10 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       if (gen === hydrateGenRef.current) setPlanReady(true)
       return
     }
-    if (appliedRef.current) return
+    if (appliedRef.current) {
+      if (gen === hydrateGenRef.current) setPlanReady(true)
+      return
+    }
     appliedRef.current = true
     try {
       const pending = statePromiseRef.current
@@ -65,6 +69,7 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       console.error('Failed to hydrate mockup from API', error)
     }
   }, [page, effectiveUserId, displayName, isAdminMode])
+  hydrateRef.current = hydrate
 
   const persist = useCallback((state, quiet, userId) => {
     const pageAtCall = pageRef.current
@@ -107,7 +112,41 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       statePromiseRef.current = null
       if (!authLoading) setPlanReady(true)
     }
-  }, [page, effectiveUserId, authLoading, isAdminMode])
+  }, [page, effectiveUserId, isAdminMode])
+
+  useEffect(() => {
+    if (effectiveUserId || authLoading) return
+    setPlanReady(true)
+  }, [authLoading, effectiveUserId])
+
+  useEffect(() => {
+    const recover = () => {
+      if (document.hidden) return
+      const frame = iframeRef.current
+      if (!frame) return
+      try {
+        if (frame.contentWindow?.__LIFEMAP__) {
+          hydrateRef.current?.()
+          return
+        }
+        const doc = frame.contentDocument
+        if (!doc || doc.readyState !== 'complete') return
+      } catch {
+        return
+      }
+      appliedRef.current = false
+      hydratedRef.current = false
+      setPlanReady(false)
+      const current = frame.getAttribute('src')
+      if (current) frame.setAttribute('src', current)
+    }
+    document.addEventListener('visibilitychange', recover)
+    window.addEventListener('pageshow', recover)
+    return () => {
+      document.removeEventListener('visibilitychange', recover)
+      window.removeEventListener('pageshow', recover)
+    }
+  }, [])
 
   useEffect(() => {
     if (!isAuthenticated && !isAdminMode) api()?.setAccount(null)
@@ -168,6 +207,7 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       if (data.page && data.page !== page) return
 
       if (data.type === 'ready') {
+        appliedRef.current = false
         if (!pendingSaveRef.current) hydrate()
         return
       }
@@ -254,6 +294,7 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
         src={src}
         style={{ visibility: planReady ? 'visible' : 'hidden' }}
         onLoad={() => {
+          appliedRef.current = false
           if (!pendingSaveRef.current) hydrate()
         }}
       />

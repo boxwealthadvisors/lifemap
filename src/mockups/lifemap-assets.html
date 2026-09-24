@@ -97,6 +97,9 @@ a{text-decoration:none; color:inherit}
   background:#fff4f2; border:1px solid #f0c2bc; color:#8c2f28; font-size:13.5px; line-height:1.5; font-weight:600}
 .cashwarn.on{display:block}
 .cashwarn b{font-weight:800}
+#sec-register .cashwarn{margin:0 22px 12px}
+tr.cash-short td{background:#fff4f2}
+tr.cash-short input[data-k="start"], tr.cash-short input[data-k="val"]{outline:2px solid #e2574c; outline-offset:-2px}
 
 /* donut card — one full-width section */
 .mixcard{padding:18px 22px 20px; margin-bottom:16px}
@@ -197,6 +200,8 @@ td.rt{text-align:right}
 /* a return solved from a contracted maturity value, not typed by hand */
 .cell.derived{color:var(--slate); font-style:italic; cursor:help}
 .cell.derived:hover{background:transparent}
+.cell:disabled{background:var(--paper); color:var(--muted); cursor:not-allowed; opacity:.72}
+.cell:disabled:hover{background:var(--paper)}
 .tagpick{min-width:138px}
 .catpick{min-width:190px}
 .freqpick{min-width:118px}
@@ -367,7 +372,7 @@ td.rt{text-align:right}
   <div class="phead">
     <h1>What you own
       <button class="pmore" type="button" aria-expanded="false" aria-controls="phead-desc" aria-label="Show what this page is for"></button></h1>
-    <div class="pdesc" id="phead-desc"><p>Every holding, in one register &mdash; investments, retirement, emergency, personal assets such as a home or gold, cash, and income funds. Leave Start date blank for something you already own. Set it in the future to plan a purchase: that amount leaves the shared Cash pool on that date and must be covered by cash already there plus redemptions and contributions. Dated holdings and income-fund payouts land in that same pool. An income fund&rsquo;s expected return is the XIRR of its cash flows, measured from today or from the start date if that is later.</p></div>
+    <div class="pdesc" id="phead-desc"><p>Every holding, in one register &mdash; investments, retirement, emergency, personal assets such as a home or gold, cash, and income funds. Leave Start date blank for something you already own. Set it in the future to plan a purchase: that amount leaves the shared Cash pool on that date and is refused if cash would go negative. Dated holdings and income-fund payouts land in that same pool. An income fund&rsquo;s expected return is the XIRR of its cash flows, measured from today or from the start date if that is later.</p></div>
     <div class="cashwarn" id="cash-warn" role="alert"></div>
   </div>
 
@@ -443,6 +448,7 @@ td.rt{text-align:right}
       </div>
     </div>
 
+    <div class="cashwarn" id="cash-warn-reg" role="alert"></div>
     <div class="tblwrap">
       <table>
         <thead>
@@ -478,7 +484,7 @@ td.rt{text-align:right}
       <button class="addrow" id="btn-add-cash2">+ Add cash</button>
     </div>
     <div class="foot">
-      Expected returns are long-run historical averages for each asset class, filled in as a starting point and fully editable. They are not forecasts, and your own holdings may behave very differently. For an income fund, Expected return is the XIRR of the premiums, income payouts and maturity lumpsum, measured from the start date. A future start is a planned investment: Current value is the amount that will leave Cash on that date. If redemptions or contributions later fall short, Cash can go negative and this page alerts immediately.
+      Expected returns are long-run historical averages for each asset class, filled in as a starting point and fully editable. They are not forecasts, and your own holdings may behave very differently. For an income fund, Expected return is the XIRR of the premiums, income payouts and maturity lumpsum, measured from the start date. A future start is a planned investment: Current value is the amount that will leave Cash on that date. Cash cannot go below zero &mdash; a start date or amount that would overdraw the pool is not accepted.
     </div>
   </div>
 
@@ -513,6 +519,13 @@ const CASH_COLOR = "#5a6e8c";
 const isCashName = n => /cash/i.test(String(n || ""));
 const isCash = r => isCashName(r && r.cat);
 const isIncomeFund = r => /income\s*fund/i.test(String(r && r.cat || ""));
+const hasIncomeSchedule = r => isIncomeFund(r) && num(r.inc) > 0 && !!(r.incFrom);
+const usesIncomeFlows = r => isIncomeFund(r);
+function clearIncomeFields(r){
+  r.inc = 0;
+  r.incFrom = "";
+  r.incTo = "";
+}
 const TAGS = [
   {n:"Investment", c:"#2f6fd0", d:"Money working towards future goals."},
   {n:"Retirement", c:"#0d8a78", d:"Earmarked for life after you stop earning."},
@@ -561,12 +574,28 @@ function fmt(n){
   return s+"\u20B9"+a;
 }
 const full = n => (n<0?"\u2212":"")+"\u20B9"+Math.abs(Math.round(n)).toLocaleString("en-IN");
+function today0(){
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  return d;
+}
+function startDateOf(r){
+  if(!r || !r.start) return null;
+  const d = new Date(r.start);
+  if(isNaN(d.getTime())) return null;
+  d.setHours(0,0,0,0);
+  return d;
+}
 const startYears = r => {
   if(isCash(r)) return 0;
   const y = calYears(r.start);
   return (y == null || y < 0) ? 0 : y;
 };
-const isPlanned = r => startYears(r) > 0;
+const isPlanned = r => {
+  if(isCash(r)) return false;
+  const d = startDateOf(r);
+  return !!(d && d.getTime() > today0().getTime());
+};
 const ownedVal = r => isPlanned(r) ? 0 : num(r.val);
 const totalVal = () => ROWS.reduce((t,r) => t + ownedVal(r), 0) + UNASSIGNED;
 const esc = s => String(s??"").replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
@@ -677,7 +706,7 @@ function pathOf(r, years){
     for(let t=0; t<years; t++){ v = v + (t < run ? annual : 0); out.push(v); }
     return out;
   }
-  if(isIncomeFund(r) && (num(r.inc) > 0 || r.mat)){
+  if(usesIncomeFlows(r) && (num(r.inc) > 0 || r.mat)){
     return incomeFundFlows(r, years).residual;
   }
   const start = startYears(r);
@@ -706,8 +735,9 @@ function cashPoolPath(years){
   const buy = new Array(years+1).fill(0);
   ROWS.filter(r => !isCash(r)).forEach(r => {
     const start = startYears(r);
-    if(start > 0 && start <= years) buy[start] += plannedBuyAt(r);
-    if(isIncomeFund(r) && (num(r.inc) > 0 || r.mat)){
+    const buyAmt = plannedBuyAt(r);
+    if(buyAmt > 0 && start <= years) buy[start] += buyAmt;
+    if(usesIncomeFlows(r) && (num(r.inc) > 0 || r.mat)){
       incomeFundFlows(r, years).cashAdd.forEach((v,i) => { payout[i] += v; });
       return;
     }
@@ -793,7 +823,7 @@ function incomeFundIrr(r){
 }
 /* the return a contracted maturity value implies, given the money actually going in */
 function impliedReturn(r){
-  if(isIncomeFund(r)) return incomeFundIrr(r);
+  if(usesIncomeFlows(r)) return incomeFundIrr(r);
   const mat = maturityYears(r), target = num(r.mval);
   if(!isFinite(mat) || mat <= 0 || target <= 0) return null;
   const years = Math.ceil(mat);
@@ -978,19 +1008,23 @@ function drawGrowth(){
   S.forEach(s => s.pts.forEach((v,i) => totals[i] += v));
   const y0 = new Date().getFullYear();
 
-  if(!S.length || totals[years] <= 0){
+  if(!S.length){
     svg.innerHTML = `<text x="${GL+PW/2}" y="${GT+PH/2}" text-anchor="middle" fill="#9aa7bd" font-size="14" font-family="var(--font)">Add an asset below to see the growth path</text>`;
     leg.innerHTML = ""; $("g-sub").innerHTML = "Nothing to project yet";
     return;
   }
 
-  const peak = Math.max(...totals), step = niceStep(peak), top = Math.ceil(peak/step)*step;
+  const trough = Math.min(0, ...S.flatMap(s => s.pts), ...totals);
+  const peak = Math.max(...totals, 1);
+  const step = niceStep(peak - trough);
+  const top = Math.ceil(peak/step)*step;
+  const bot = trough < 0 ? Math.floor(trough/step)*step : 0;
   const X = i => GL + (i/years)*PW;
-  const Y = v => GT + PH - (v/top)*PH;
+  const Y = v => GT + PH - ((v - bot)/((top - bot)||1))*PH;
 
   let g = "";
   /* dashed grid like the reference graph */
-  for(let v=0; v<=top+1; v+=step){
+  for(let v=bot; v<=top+1; v+=step){
     const y = Y(v).toFixed(1);
     g += `<line x1="${GL}" y1="${y}" x2="${GL+PW}" y2="${y}" stroke="#c7cdd5" stroke-width="1" stroke-dasharray="4 4"/>`
        + `<text x="${GL-10}" y="${y}" text-anchor="end" dominant-baseline="middle" fill="#52657e" font-size="12">${fmt(v)}</text>`;
@@ -1268,6 +1302,7 @@ function drawTable(){
 
   rows.forEach(({r,i}, vi) => {
     const tr = document.createElement("tr");
+    if(!canAffordPlanned(r)) tr.classList.add("cash-short");
     const cat = catOf(r.cat), tag = tagOf(r.tag);
     if(isCash(r)){ r.ret = 0; r.cat = "Cash"; }
     const retLocked = returnIsDerived(r) || isCash(r);
@@ -1287,9 +1322,9 @@ function drawTable(){
       <td><button type="button" class="dd freqpick" data-dd="freq" aria-haspopup="listbox" aria-expanded="false">
             <span class="lbl">${esc(r.freq)}</span></button></td>
       <td><input class="cell small" data-k="exp" type="date" value="${r.exp}"></td>
-      <td><input class="cell money" data-k="inc" type="text" inputmode="decimal" value="${num(r.inc) > 0 ? r.inc : ""}" placeholder="0" title="Yearly income paid into cash"></td>
-      <td><input class="cell small" data-k="incFrom" type="date" value="${r.incFrom || ""}"></td>
-      <td><input class="cell small" data-k="incTo" type="date" value="${r.incTo || ""}"></td>
+      <td><input class="cell money" data-k="inc" type="text" inputmode="decimal" value="${num(r.inc) > 0 ? r.inc : ""}" placeholder="0" ${isIncomeFund(r) ? `title="Yearly income paid into cash"` : `disabled title="Income payout is only for Income fund"`}></td>
+      <td><input class="cell small" data-k="incFrom" type="date" value="${r.incFrom || ""}" ${isIncomeFund(r) ? "" : `disabled title="Income from is only for Income fund"`}></td>
+      <td><input class="cell small" data-k="incTo" type="date" value="${r.incTo || ""}" ${isIncomeFund(r) ? "" : `disabled title="Income to is only for Income fund"`}></td>
       <td><input class="cell small" data-k="mat" type="date" value="${r.mat || ""}"></td>
       <td><input class="cell money" data-k="mval" type="text" inputmode="decimal" value="${num(r.mval) > 0 ? r.mval : ""}" placeholder="0"></td>
       <td class="rt"><span class="proj">${projectionHtml(r)}</span></td>
@@ -1313,16 +1348,28 @@ function drawTable(){
     };
 
     tr.querySelectorAll("[data-k]").forEach(el => {
-      el.addEventListener("input", e => {
+      const apply = e => {
         const k = e.target.dataset.k;
-        r[k] = ["val","sip","ret","mval","inc"].includes(k) ? num(e.target.value) : e.target.value;
+        const next = ["val","sip","ret","mval","inc"].includes(k) ? num(e.target.value) : e.target.value;
+        if(k === "start" || k === "val"){
+          if(!trySetPlannedField(r, k, next, e.target)){
+            drawCashWarn();
+            tr.classList.toggle("cash-short", !canAffordPlanned(r));
+            return;
+          }
+        } else {
+          r[k] = next;
+        }
         dirty();
         /* current value, SIP, income dates and maturity all feed the implied rate */
         if(isIncomeFund(r) || k === "mat" || k === "mval" || returnIsDerived(r)){ syncImpliedReturn(r); paintRet(); }
         const proj = tr.querySelector(".proj");
         if(proj) proj.innerHTML = projectionHtml(r);
         refresh(false);
-      });
+        tr.classList.toggle("cash-short", !canAffordPlanned(r));
+      };
+      el.addEventListener("input", apply);
+      el.addEventListener("change", apply);
     });
     const earBtn = tr.querySelector("[data-ear]");
     if(earBtn) earBtn.addEventListener("click", () => openEarmark(earBtn, r, "earmarks", GOALS, "Earmarked to goals", true, dirty));
@@ -1337,8 +1384,9 @@ function drawTable(){
         if(v === r[k]) return;
         r[k] = v; dirty();
         if(k === "cat"){
-          if(isCashName(v)){ r.cat = "Cash"; r.ret = 0; r.mat = ""; r.mval = 0; r.inc = 0; r.incFrom = ""; r.incTo = ""; r.start = ""; }
+          if(isCashName(v)){ r.cat = "Cash"; r.ret = 0; r.mat = ""; r.mval = 0; r.start = ""; }
           else if(!returnIsDerived(r)) r.ret = catOf(r.cat).ret;
+          if(!isIncomeFund(r)) clearIncomeFields(r);
         }
         if(k === "freq") syncImpliedReturn(r);
         if(k === "tag" && v === "Personal") r.earmarks = [];
@@ -1369,16 +1417,56 @@ function cashShortfalls(years){
   cash.forEach((v,i) => { if(v < -0.5) hits.push({ year: y0+i, v }); });
   return hits;
 }
-function drawCashWarn(){
-  const el = $("cash-warn");
+function cashAvailableFor(r){
+  const years = Math.max(planHorizon(), startYears(r), 1);
+  const start = startYears(r);
+  const path = cashPoolPath(years);
+  return (path[start] || 0) + plannedBuyAt(r);
+}
+function canAffordPlanned(r){
+  if(!isPlanned(r) || num(r.val) <= 0) return true;
+  return num(r.val) <= cashAvailableFor(r) + 0.5;
+}
+let CASH_BLOCK_MSG = "";
+function cashBlockHtml(r){
+  const need = num(r && r.val);
+  const avail = Math.max(0, cashAvailableFor(r));
+  const when = startDateOf(r);
+  const year = when ? when.getFullYear() : new Date().getFullYear();
+  return `Not enough cash to start this in <b>${year}</b>. Cash available then: <b>${full(avail)}</b>. This purchase needs <b>${full(need)}</b>. Add cash, or wait for a redemption, before planning this buy.`;
+}
+function paintCashWarn(el, html){
   if(!el) return;
-  const hits = cashShortfalls(planHorizon());
-  if(!hits.length){ el.classList.remove("on"); el.textContent = ""; return; }
-  const first = hits[0], worst = hits.reduce((a,b) => a.v < b.v ? a : b);
+  if(!html){ el.classList.remove("on"); el.textContent = ""; return; }
   el.classList.add("on");
-  el.innerHTML = `Cash goes negative in <b>${first.year}</b> (${fmt(first.v)}).`
-    + (worst.year !== first.year ? ` Lowest point <b>${worst.year}</b> (${fmt(worst.v)}).` : "")
-    + ` A planned investment is larger than cash from redemptions and contributions, or a later change reduced those inflows.`;
+  el.innerHTML = html;
+}
+function drawCashWarn(){
+  const hits = cashShortfalls(planHorizon());
+  let html = CASH_BLOCK_MSG;
+  if(!html && hits.length){
+    const first = hits[0], worst = hits.reduce((a,b) => a.v < b.v ? a : b);
+    html = `Cash would go negative in <b>${first.year}</b> (${fmt(first.v)}).`
+      + (worst.year !== first.year ? ` Lowest point <b>${worst.year}</b> (${fmt(worst.v)}).` : "")
+      + ` A planned investment is larger than cash from redemptions and contributions. Reduce the amount or clear the start date.`;
+  }
+  paintCashWarn($("cash-warn"), html);
+  paintCashWarn($("cash-warn-reg"), html);
+}
+function trySetPlannedField(r, k, next, el){
+  const prev = r[k];
+  r[k] = next;
+  if(canAffordPlanned(r)){
+    if(String(next) !== String(prev)) CASH_BLOCK_MSG = "";
+    return true;
+  }
+  CASH_BLOCK_MSG = cashBlockHtml(r);
+  r[k] = prev;
+  if(el){
+    if(k === "val") el.value = prev === 0 || prev === "" ? "" : prev;
+    else el.value = prev || "";
+  }
+  return false;
 }
 function refresh(redrawTable = true){
   drawDonut(); drawGrowth(); drawCashWarn();
@@ -1701,7 +1789,8 @@ function rowsFromTable(table){
       earmarks: tag === "Personal" ? [] : [],
       saved: false
     };
-    if (isCash(row)) { row.cat = "Cash"; row.ret = 0; row.mat = ""; row.mval = 0; row.inc = 0; row.incFrom = ""; row.incTo = ""; row.start = ""; }
+    if (isCash(row)) { row.cat = "Cash"; row.ret = 0; row.mat = ""; row.mval = 0; row.start = ""; }
+    if (!isIncomeFund(row)) clearIncomeFields(row);
     else syncImpliedReturn(row);
     out.push(row);
   });

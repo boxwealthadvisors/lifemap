@@ -896,7 +896,7 @@ function maturityList(N){
   })).filter(m => m.y >= 0 && m.y <= N);
 }
 function principalOf(m){
-  return m.startY > 0 ? m.buy : m.v;
+  return num(m.buy) > 0 ? num(m.buy) : num(m.v);
 }
 function maturityPayoutAt(m, gR){
   const p = principalOf(m);
@@ -945,7 +945,7 @@ function projectIncomeFunds(N){
     let v = 0;
     for(let y=0; y<=N; y++){
       if(y < startY || y > matY) continue;
-      v = y === startY ? (startY > 0 ? buy : owned) : v*(1+g);
+      v = y === startY ? (buy > 0 ? buy : owned) : v*(1+g);
       if(annual > 0 && sipRun != null && y >= startY && y <= sipRun && y < matY) v += annual;
       if(inc > 0 && y >= incFrom && y <= incTo && y < matY){
         cashAdd[y] += inc;

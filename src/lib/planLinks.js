@@ -101,6 +101,22 @@ export function isIncomeFundCategory(cat) {
   return /income\s*fund/i.test(String(cat || ''))
 }
 
+function assetCat(a) {
+  return a?.category || a?.custom_data?.cat || a?.cat
+}
+
+/* Income payouts apply from the schedule fields, not only the Income fund label. */
+export function hasIncomeSchedule(a) {
+  const cd = a?.custom_data || {}
+  const inc = num(a?.income_amount ?? cd.incomeAmount ?? a?.inc)
+  const start = a?.income_start_date ?? cd.incomeStartDate ?? a?.incFrom
+  return inc > 0 && start != null && String(start).trim() !== ''
+}
+
+export function isIncomeLikeAsset(a) {
+  return isIncomeFundCategory(assetCat(a))
+}
+
 export function calendarYearsFromNow(raw) {
   if (raw == null || raw === '') return null
   const y = new Date(raw).getFullYear()
@@ -120,7 +136,13 @@ function assetStartRaw(a) {
 }
 
 export function isFutureStart(raw) {
-  return assetStartYear(raw) > 0
+  if (raw == null || raw === '') return false
+  const d = new Date(raw)
+  if (!Number.isFinite(d.getTime())) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime() > today.getTime()
 }
 
 /* Cash on the register is one shared 0% pool, including every Cash-category row. */
@@ -139,7 +161,7 @@ export function assetMaturityRows(assets) {
   return asList(assets, 'assets')
     .filter((a) => (a.tag || '') !== 'Personal')
     .filter((a) => !isCashCategory(a.category || a.custom_data?.cat || a.cat))
-    .filter((a) => !isIncomeFundCategory(a.category || a.custom_data?.cat || a.cat))
+    .filter((a) => !isIncomeLikeAsset(a))
     .map((a) => {
       const cd = a.custom_data || {}
       const raw = a.maturity_date ?? cd.maturityDate
@@ -147,13 +169,15 @@ export function assetMaturityRows(assets) {
       const iso = String(raw).match(/^(\d{4})-\d{2}-\d{2}/)
       const year = iso ? Number(iso[1]) : new Date(raw).getFullYear()
       if (!Number.isFinite(year)) return null
-      const startY = assetStartYear(assetStartRaw(a))
+      const startRaw = assetStartRaw(a)
+      const startY = assetStartYear(startRaw)
       const amount = num(a.current_value ?? a.val)
+      const future = isFutureStart(startRaw)
       return {
         y: year - now,
         startY,
-        v: startY > 0 ? 0 : amount,
-        buy: startY > 0 ? amount : 0,
+        v: future ? 0 : amount,
+        buy: future ? amount : 0,
         mval: num(a.maturity_value ?? cd.maturityValue),
       }
     })
@@ -163,7 +187,7 @@ export function assetMaturityRows(assets) {
 export function incomeFundRows(assets) {
   return asList(assets, 'assets')
     .filter((a) => (a.tag || '') !== 'Personal')
-    .filter((a) => isIncomeFundCategory(a.category || a.custom_data?.cat || a.cat))
+    .filter((a) => isIncomeLikeAsset(a))
     .map((a) => {
       const cd = a.custom_data || {}
       const matY = calendarYearsFromNow(a.maturity_date ?? cd.maturityDate)
@@ -173,12 +197,14 @@ export function incomeFundRows(assets) {
       const retRaw = a.expected_return ?? cd.expectedReturn
       const retN = Number(retRaw)
       const ret = Number.isFinite(retN) ? (retN > 0 && retN <= 1 ? retN * 100 : retN) : 4.4
-      const startY = assetStartYear(assetStartRaw(a))
+      const startRaw = assetStartRaw(a)
+      const startY = assetStartYear(startRaw)
       const amount = num(a.current_value ?? a.val)
+      const future = isFutureStart(startRaw)
       return {
         startY,
-        v: startY > 0 ? 0 : amount,
-        buy: startY > 0 ? amount : 0,
+        v: future ? 0 : amount,
+        buy: future ? amount : 0,
         ret,
         sip: num(a.sip_amount ?? cd.sipAmount ?? a.sip),
         per: ({ Monthly: 12, Quarterly: 4, 'Half-yearly': 2, Yearly: 1, 'One-time': 0 }[a.sip_frequency || cd.sipFrequency || a.freq] || 0),
@@ -198,12 +224,13 @@ export function plannedGrowRows(assets) {
   return asList(assets, 'assets')
     .filter((a) => (a.tag || '') !== 'Personal')
     .filter((a) => !isCashCategory(a.category || a.custom_data?.cat || a.cat))
-    .filter((a) => !isIncomeFundCategory(a.category || a.custom_data?.cat || a.cat))
+    .filter((a) => !isIncomeLikeAsset(a))
     .filter((a) => !(a.maturity_date || a.custom_data?.maturityDate))
     .map((a) => {
-      const startY = assetStartYear(assetStartRaw(a))
+      const startRaw = assetStartRaw(a)
+      const startY = assetStartYear(startRaw)
       const v = num(a.current_value ?? a.val)
-      if (startY <= 0 || v <= 0) return null
+      if (!isFutureStart(startRaw) || v <= 0) return null
       const retRaw = a.expected_return ?? a.custom_data?.expectedReturn
       const retN = Number(retRaw)
       const ret = Number.isFinite(retN) ? (retN > 0 && retN <= 1 ? retN * 100 : retN) : 11
@@ -218,9 +245,10 @@ export function plannedCashDraws(assets) {
   return asList(assets, 'assets')
     .filter((a) => !isCashCategory(a.category || a.custom_data?.cat || a.cat))
     .map((a) => {
-      const startY = assetStartYear(assetStartRaw(a))
+      const startRaw = assetStartRaw(a)
+      const startY = assetStartYear(startRaw)
       const v = num(a.current_value ?? a.val)
-      if (startY <= 0 || v <= 0) return null
+      if (!isFutureStart(startRaw) || v <= 0) return null
       return { y: startY, v }
     })
     .filter(Boolean)

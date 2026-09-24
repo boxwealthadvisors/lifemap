@@ -29,7 +29,7 @@ export const AuthProvider = ({ children }) => {
   // Debounced auth check to prevent request flooding
   const debouncedCheckAuth = useDebounce(() => {
     const hasToken = Boolean(localStorage.getItem('authToken'));
-    if (hasToken) checkAuthStatus();
+    if (hasToken) checkAuthStatus({ silent: true });
   }, 400);
 
   // Check if user is already logged in on app start
@@ -61,24 +61,27 @@ export const AuthProvider = ({ children }) => {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [debouncedCheckAuth]);
 
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = async ({ silent = false } = {}) => {
     const epoch = authEpochRef.current;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const response = await ApiService.getProfile();
       if (epoch !== authEpochRef.current) return;
       setUser(response.user);
     } catch (error) {
       if (epoch !== authEpochRef.current) return;
+      const msg = String(error.message || '').toLowerCase();
+      const unauth = msg.includes('not authenticated') || msg.includes('access token') || msg.includes('401');
+      if (silent && !unauth) return;
       setUser(null);
       clearAuthStorage();
-      if (error.message && !error.message.toLowerCase().includes('not authenticated') && !error.message.toLowerCase().includes('access token')) {
+      if (error.message && !unauth) {
         setError(error.message);
       } else {
         setError(null);
       }
     } finally {
-      if (epoch === authEpochRef.current) setLoading(false);
+      if (!silent && epoch === authEpochRef.current) setLoading(false);
     }
   };
 
