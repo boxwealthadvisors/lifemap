@@ -4,6 +4,8 @@ import Shell from './Shell';
 import MockupHost from './MockupHost';
 import { AdminUserProvider } from '../contexts/AdminUserContext';
 import AdminInsurancePage from '../pages/AdminInsurancePage';
+import ProfilePage from '../pages/ProfilePage';
+import ErrorBoundary from './ErrorBoundary';
 
 const PAGE_BY_SECTION = {
   dashboard: 'fp',
@@ -23,10 +25,11 @@ function sectionFromPath(path) {
   if (clean === '/loans') return 'loans';
   if (clean === '/expenses') return 'expenses';
   if (clean === '/insurance') return 'insurance';
+  if (clean === '/profile') return 'profile';
   return null;
 }
 
-export default function ClientPlanView({ clientId, clientName, onBack }) {
+export default function ClientPlanView({ clientId, clientName, onBack, onClientUpdated }) {
   const [activeSection, setActiveSection] = useState('dashboard');
   const { admin, adminLogout } = useAuth();
 
@@ -36,7 +39,7 @@ export default function ClientPlanView({ clientId, clientName, onBack }) {
   };
 
   return (
-    <AdminUserProvider userId={clientId}>
+    <AdminUserProvider userId={clientId} clientName={clientName} onClientUpdated={onClientUpdated}>
       <div className="lm-admin-plan">
         <div className="lm-admin-plan-bar">
           <button type="button" className="lm-tlink" onClick={onBack}>← All clients</button>
@@ -46,17 +49,23 @@ export default function ClientPlanView({ clientId, clientName, onBack }) {
             <button type="button" className="lm-btn" onClick={handleLogout}>Logout</button>
           </span>
         </div>
-        {activeSection === 'insurance' ? (
+        {activeSection === 'insurance' || activeSection === 'profile' ? (
           <div className="lm-admin-plan-insurance">
             <Shell
               adminMode
-              activeSection="insurance"
+              activeSection={activeSection}
               onSectionChange={setActiveSection}
               adminUserName={admin?.name || admin?.username}
               userName={clientName}
               onBack={onBack}
             >
-              <AdminInsurancePage />
+              {activeSection === 'insurance' ? (
+                <AdminInsurancePage />
+              ) : (
+                <ErrorBoundary>
+                  <ProfilePage />
+                </ErrorBoundary>
+              )}
             </Shell>
           </div>
         ) : (

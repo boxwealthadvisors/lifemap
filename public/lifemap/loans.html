@@ -1366,6 +1366,11 @@ document.querySelectorAll(".pmore").forEach(btn => {
         if (S.expRegister) replaceList(S.expRegister, []);
         if (S.work) replaceList(S.work, []);
         if (S.household) replaceList(S.household, []);
+        if (S.assetMaturities) replaceList(S.assetMaturities, []);
+        if (S.incomeFunds) replaceList(S.incomeFunds, []);
+        if (S.plannedGrows) replaceList(S.plannedGrows, []);
+        if (S.plannedDraws) replaceList(S.plannedDraws, []);
+        S.cashNow = 0;
         if (typeof renderFamily === "function") renderFamily();
         var lock = document.querySelector(".lockover");
         if (lock) lock.style.display = "none";
@@ -1379,7 +1384,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
   function getState(){
     try {
       if (PAGE === "fp") {
-        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, assetMaturities:(S.assetMaturities||[]).slice(), loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
+        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, assetMaturities:(S.assetMaturities||[]).slice(), incomeFunds:(S.incomeFunds||[]).slice(), plannedGrows:(S.plannedGrows||[]).slice(), plannedDraws:(S.plannedDraws||[]).slice(), cashNow:S.cashNow||0, loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
       }
       if (PAGE === "assets") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, MODE: MODE, HZ: HZ, GOALS: (typeof GOALS !== "undefined" ? GOALS.slice() : []) };
       if (PAGE === "work") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, AGE: AGE };
@@ -1395,6 +1400,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
     var src = st.S;
     S.age = src.age; S.salary = src.salary; S.gSal = src.gSal; S.workTill = src.workTill;
     S.finAssets = src.finAssets; S.personalAssets = src.personalAssets;
+    S.cashNow = src.cashNow || 0;
     S.gRet = src.gRet; S.gInf = src.gInf; S.lifeTo = src.lifeTo;
     if (src.loans) replaceList(S.loans, src.loans);
     if (src.goals) replaceList(S.goals, src.goals);
@@ -1414,6 +1420,18 @@ document.querySelectorAll(".pmore").forEach(btn => {
     if (src.assetMaturities) {
       if (!S.assetMaturities) S.assetMaturities = [];
       replaceList(S.assetMaturities, src.assetMaturities);
+    }
+    if (src.incomeFunds) {
+      if (!S.incomeFunds) S.incomeFunds = [];
+      replaceList(S.incomeFunds, src.incomeFunds);
+    }
+    if (src.plannedGrows) {
+      if (!S.plannedGrows) S.plannedGrows = [];
+      replaceList(S.plannedGrows, src.plannedGrows);
+    }
+    if (src.plannedDraws) {
+      if (!S.plannedDraws) S.plannedDraws = [];
+      replaceList(S.plannedDraws, src.plannedDraws);
     }
     if (typeof renderFamily === "function") renderFamily();
     var set = function(id, val){ var el = $(id); if (el) el.value = val; };

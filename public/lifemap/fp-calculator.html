@@ -225,6 +225,10 @@ a{color:inherit} button,input,select{font-family:var(--font)}
 .shead h2{font-size:23px}
 .shead p{margin:4px 0 0; color:var(--muted); font-size:14px; max-width:74ch}
 .card{background:#fff; border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow)}
+.cashwarn{display:none; margin:0 0 16px; padding:11px 14px; border-radius:10px;
+  background:#fff4f2; border:1px solid #f0c2bc; color:#8c2f28; font-size:13.5px; line-height:1.5; font-weight:600}
+.cashwarn.on{display:block}
+.cashwarn b{font-weight:800}
 
 /* ---------- supporting: today's position (light) ---------- */
 .support{background:#fff; border-bottom:1px solid var(--line)}
@@ -452,6 +456,7 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
     <div class="pdesc" id="hero-desc">
       <p class="sub">If you carry on earning, spending and investing roughly as you do now, this shows when salary could become optional. Your salary still continues in the projection until the working age you choose below.</p>
     </div>
+    <div class="cashwarn" id="cash-warn" role="alert"></div>
 
     <div class="ffgrid">
 
@@ -748,7 +753,7 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
     <span style="margin-left:auto"><a href="#">Terms</a> &nbsp;&middot;&nbsp; <a href="#">Privacy</a> &nbsp;&middot;&nbsp; <a href="#">Talk to an advisor</a></span>
   </div>
   <div class="disclaimer">
-    LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It uses salary, work-asset streams and family-member income, each with its own growth rate and end age; personal assets are not sold to fund the plan; a holding you gave a contracted maturity value pays exactly that amount on its maturity date rather than the assumed return, and the proceeds are then reinvested with the rest; loan instalments repay the balance without interest; and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
+    LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It uses salary, work-asset streams and family-member income, each with its own growth rate and end age; personal assets are not sold to fund the plan; a holding with a maturity date leaves the growing pool on that date and its payout joins a shared cash pool that does not grow; an income fund keeps its own IRR until each income payout and the terminal lumpsum also move into that cash pool; a future-dated holding is bought from that cash pool on its start date; loan instalments repay the balance without interest; and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
   </div>
 </footer>
 
@@ -783,6 +788,10 @@ const S = {
   /* Holdings whose payout is contractual, from the Assets register:
      {y: years from now to maturity, v: value today, mval: promised amount} */
   assetMaturities:[],
+  incomeFunds:[],
+  plannedGrows:[],
+  plannedDraws:[],
+  cashNow:0,
   gRet:11, gInf:6, lifeTo:85
 };
 
@@ -875,18 +884,81 @@ function livingAt(t, gI){
 function loanYears(){
   return S.loans.map(l => { const a = num(l.emi)*12; return a>0 ? Math.ceil(num(l.v)/a) : 0; });
 }
-/* A holding with a contracted payout stops being a projection on its maturity date.
-   The plan receives the difference between the promise and what the blended return
-   would have made of that holding by then, which is negative for a policy that
-   guarantees less than the portfolio assumption. Everything else is untouched. */
-function maturityAdjust(gR, N){
-  const adj = new Array(N+1).fill(0);
-  (S.assetMaturities || []).forEach(m => {
-    const y = Math.round(num(m.y)), promised = num(m.mval);
-    if(promised <= 0 || !(y >= 0) || y > N) return;
-    adj[y] += promised - num(m.v)*Math.pow(1+gR, y);
+/* Dated holdings are ring-fenced until they mature, then they drop out of the
+   growing pool and their payout joins cash, which never compounds. */
+function maturityList(N){
+  return (S.assetMaturities || []).map(m => ({
+    y: Math.round(num(m.y)),
+    startY: Math.max(0, Math.round(num(m.startY))),
+    v: Math.max(0, num(m.v)),
+    buy: Math.max(0, num(m.buy)),
+    mval: num(m.mval)
+  })).filter(m => m.y >= 0 && m.y <= N);
+}
+function principalOf(m){
+  return m.startY > 0 ? m.buy : m.v;
+}
+function maturityPayoutAt(m, gR){
+  const p = principalOf(m);
+  return m.mval > 0 ? m.mval : p * Math.pow(1+gR, Math.max(0, m.y - m.startY));
+}
+function ringAt(mats, t, gR){
+  return mats.filter(m => m.startY <= t && m.y > t)
+    .reduce((s,m) => s + principalOf(m)*Math.pow(1+gR, t - m.startY), 0);
+}
+function cashInAt(mats, t, gR){
+  return mats.filter(m => m.y === t && m.startY <= t).reduce((s,m) => s + maturityPayoutAt(m, gR), 0);
+}
+function buyAt(t){
+  return (S.plannedDraws || []).reduce((s,d) => s + (Math.round(num(d.y)) === t ? num(d.v) : 0), 0);
+}
+function projectPlannedGrows(N){
+  const pts = new Array(N+1).fill(0);
+  (S.plannedGrows || []).forEach(p => {
+    const startY = Math.round(num(p.y));
+    const g = num(p.ret)/100;
+    let v = 0;
+    for(let y=0; y<=N; y++){
+      if(y < startY) continue;
+      v = y === startY ? num(p.v) : v*(1+g);
+      pts[y] += v;
+    }
   });
-  return adj;
+  return pts;
+}
+/* Income funds: premiums through sipRun, residual at the solved XIRR, then
+   each income year and the maturity lumpsum move into cash. */
+function projectIncomeFunds(N){
+  const residual = new Array(N+1).fill(0);
+  const cashAdd = new Array(N+1).fill(0);
+  (S.incomeFunds || []).forEach(f => {
+    const g = num(f.ret)/100;
+    const annual = num(f.sip) * num(f.per);
+    const sipRun = f.sipRun == null || f.sipRun === "" ? null : num(f.sipRun);
+    const inc = num(f.inc);
+    const incFrom = f.incFrom == null ? 999 : num(f.incFrom);
+    const incTo = f.incTo == null ? -1 : num(f.incTo);
+    const matY = isFinite(Number(f.matY)) ? Number(f.matY) : Infinity;
+    const startY = Math.max(0, Math.round(num(f.startY)));
+    const owned = num(f.v);
+    const buy = num(f.buy);
+    let v = 0;
+    for(let y=0; y<=N; y++){
+      if(y < startY || y > matY) continue;
+      v = y === startY ? (startY > 0 ? buy : owned) : v*(1+g);
+      if(annual > 0 && sipRun != null && y >= startY && y <= sipRun && y < matY) v += annual;
+      if(inc > 0 && y >= incFrom && y <= incTo && y < matY){
+        cashAdd[y] += inc;
+        v = Math.max(0, v - inc);
+      }
+      if(y === matY){
+        cashAdd[y] += num(f.mval) > 0 ? num(f.mval) : v;
+        v = 0;
+      }
+      residual[y] += v;
+    }
+  });
+  return { residual, cashAdd };
 }
 function engine(o){
   o = o || {};
@@ -914,22 +986,36 @@ function engine(o){
   req[N] = cost(N);
   for(let t=N-1;t>=0;t--) req[t] = cost(t) + req[t+1]/(1+gR);
 
-  /* Actual projected pool: salary, work streams and household income keep arriving on their own schedules. */
-  const matAdj = maturityAdjust(gR, N);
-  const pool = [num(S.finAssets) + matAdj[0]];
+  /* Growing assets take surplus at the plan return. Cash is a shared 0% pool.
+     Dated holdings stay ring-fenced until their year, then move into cash.
+     Income funds keep their own IRR until each payout joins cash. */
+  const mats = maturityList(N);
+  const ifunds = projectIncomeFunds(N);
+  const grows = projectPlannedGrows(N);
+  const cashNow = Math.max(0, num(S.cashNow));
+  const reserved = mats.reduce((s,m) => s + m.v, 0)
+    + (S.incomeFunds || []).reduce((s,f) => s + Math.max(0, num(f.v)), 0);
+  const growing0 = Math.max(0, num(S.finAssets) - cashNow - reserved);
+  const growing = [growing0];
+  const cash = [cashNow + cashInAt(mats, 0, gR) + ifunds.cashAdd[0] - buyAt(0)];
+  const pool = [growing[0] + cash[0] + ringAt(mats, 0, gR) + ifunds.residual[0] + grows[0]];
   for(let t=0;t<N;t++){
-    const sal = salFull[t];
-    pool.push((pool[t] + sal - cost(t))*(1+gR) + matAdj[t+1]);
+    const nextG = (growing[t] + salFull[t] - cost(t))*(1+gR);
+    const nextC = cash[t] + cashInAt(mats, t+1, gR) + ifunds.cashAdd[t+1] - buyAt(t+1);
+    growing.push(nextG);
+    cash.push(nextC);
+    pool.push(nextG + nextC + ringAt(mats, t+1, gR) + ifunds.residual[t+1] + grows[t+1]);
   }
 
   /* Independent check that the pool at age t survives with salary set to zero from then. */
   const survivesWithoutSalary = (start,t0) => {
-    let p = start;
+    let g = growing[t0], c = cash[t0];
     for(let k=t0;k<N;k++){
-      p = (p - cost(k))*(1+gR) + matAdj[k+1];
-      if(p < -1) return false;
+      g = (g - cost(k))*(1+gR);
+      c = c + cashInAt(mats, k+1, gR) + ifunds.cashAdd[k+1] - buyAt(k+1);
+      if(g + c + ringAt(mats, k+1, gR) + ifunds.residual[k+1] + grows[k+1] < -1) return false;
     }
-    return p >= -1;
+    return g + c + ringAt(mats, N, gR) + ifunds.residual[N] + grows[N] >= -1;
   };
 
   let ff = -1;
@@ -938,7 +1024,7 @@ function engine(o){
   }
 
   const real = (v,t) => v/Math.pow(1+gI,t);
-  return {N, ff, req, pool, exp, emi, goal, goalNames, real, workAge, workStop,
+  return {N, ff, req, pool, cash, exp, emi, goal, goalNames, real, workAge, workStop,
           sal: t => salFull[t] || 0};
 }
 
@@ -1023,16 +1109,24 @@ function drawFF(){
   }
 
   const y0 = new Date().getFullYear();
-  const step = E.N <= 20 ? 2 : 5;
+  const plotW = W - PL - PR;
+  const yearPx = 34;
+  const step = E.N <= 20 ? 2 : (E.N <= 45 ? 5 : 10);
   const ticks = [];
   for(let t=0;t<=E.N;t+=step) ticks.push(t);
-  if(ticks[ticks.length-1] !== E.N) ticks.push(E.N);
+  if(ticks[ticks.length-1] !== E.N){
+    const gap = (E.N - ticks[ticks.length-1]) * plotW / Math.max(1, E.N);
+    /* On a long horizon the last 5-year tick and the planning-horizon year sit
+       on top of each other. Keep the horizon year and drop the crowded tick. */
+    if(gap < yearPx) ticks.pop();
+    ticks.push(E.N);
+  }
   ticks.forEach(t => {
     const p = pts[t];
     if(!p) return;
-    s += `<text class="axis" x="${x(p.t)}" y="${H-11}" text-anchor="middle">${y0+p.t}</text>`;
+    const anchor = t === 0 ? "start" : (t === E.N ? "end" : "middle");
+    s += `<text class="axis" x="${x(p.t)}" y="${H-11}" text-anchor="${anchor}">${y0+p.t}</text>`;
   });
-  s += `<text class="axis" x="${PL-10}" y="${H-11}" text-anchor="end" fill="#6d84aa">year</text>`;
 
   s += `<g id="hg" style="display:none">
           <line id="hl" y1="${PT}" y2="${y(min)}" stroke="rgba(255,255,255,.45)" stroke-width="1"/>
@@ -1447,9 +1541,22 @@ if(addFam) addFam.addEventListener("click", () => {
 });
 
 /* ========================= REFRESH ========================= */
+function drawCashWarn(E){
+  const el = $("cash-warn");
+  if(!el || !E || !E.cash) return;
+  const hits = [];
+  E.cash.forEach((v,i) => { if(v < -0.5) hits.push({ year: S.age + i, v }); });
+  if(!hits.length){ el.classList.remove("on"); el.textContent = ""; return; }
+  const first = hits[0], worst = hits.reduce((a,b) => a.v < b.v ? a : b);
+  el.classList.add("on");
+  el.innerHTML = `Cash goes negative at age <b>${first.year}</b> (${fmt(first.v)}).`
+    + (worst.year !== first.year ? ` Lowest point age <b>${worst.year}</b> (${fmt(worst.v)}).` : "")
+    + ` A planned investment exceeds cash from redemptions and contributions, or a later change reduced those inflows.`;
+}
 function refresh(){
   const c = current();
   FF = engine();
+  drawCashWarn(FF);
 
   /* --- freedom result --- */
   const ageEl = $("ff-age");
@@ -1790,6 +1897,11 @@ refresh();
         if (S.expRegister) replaceList(S.expRegister, []);
         if (S.work) replaceList(S.work, []);
         if (S.household) replaceList(S.household, []);
+        if (S.assetMaturities) replaceList(S.assetMaturities, []);
+        if (S.incomeFunds) replaceList(S.incomeFunds, []);
+        if (S.plannedGrows) replaceList(S.plannedGrows, []);
+        if (S.plannedDraws) replaceList(S.plannedDraws, []);
+        S.cashNow = 0;
         if (typeof renderFamily === "function") renderFamily();
         var lock = document.querySelector(".lockover");
         if (lock) lock.style.display = "none";
@@ -1803,7 +1915,7 @@ refresh();
   function getState(){
     try {
       if (PAGE === "fp") {
-        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, assetMaturities:(S.assetMaturities||[]).slice(), loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
+        return { S: { age:S.age, salary:S.salary, gSal:S.gSal, workTill:S.workTill, finAssets:S.finAssets, personalAssets:S.personalAssets, assetMaturities:(S.assetMaturities||[]).slice(), incomeFunds:(S.incomeFunds||[]).slice(), plannedGrows:(S.plannedGrows||[]).slice(), plannedDraws:(S.plannedDraws||[]).slice(), cashNow:S.cashNow||0, loans:S.loans.slice(), goals:S.goals.slice(), exp:S.exp.slice(), expRegister:(S.expRegister||[]).slice(), work:(S.work||[]).slice(), household:(S.household||[]).slice(), gRet:S.gRet, gInf:S.gInf, lifeTo:S.lifeTo } };
       }
       if (PAGE === "assets") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, MODE: MODE, HZ: HZ, GOALS: (typeof GOALS !== "undefined" ? GOALS.slice() : []) };
       if (PAGE === "work") return { ROWS: ROWS.slice(), UNASSIGNED: UNASSIGNED, AGE: AGE };
@@ -1819,6 +1931,7 @@ refresh();
     var src = st.S;
     S.age = src.age; S.salary = src.salary; S.gSal = src.gSal; S.workTill = src.workTill;
     S.finAssets = src.finAssets; S.personalAssets = src.personalAssets;
+    S.cashNow = src.cashNow || 0;
     S.gRet = src.gRet; S.gInf = src.gInf; S.lifeTo = src.lifeTo;
     if (src.loans) replaceList(S.loans, src.loans);
     if (src.goals) replaceList(S.goals, src.goals);
@@ -1838,6 +1951,18 @@ refresh();
     if (src.assetMaturities) {
       if (!S.assetMaturities) S.assetMaturities = [];
       replaceList(S.assetMaturities, src.assetMaturities);
+    }
+    if (src.incomeFunds) {
+      if (!S.incomeFunds) S.incomeFunds = [];
+      replaceList(S.incomeFunds, src.incomeFunds);
+    }
+    if (src.plannedGrows) {
+      if (!S.plannedGrows) S.plannedGrows = [];
+      replaceList(S.plannedGrows, src.plannedGrows);
+    }
+    if (src.plannedDraws) {
+      if (!S.plannedDraws) S.plannedDraws = [];
+      replaceList(S.plannedDraws, src.plannedDraws);
     }
     if (typeof renderFamily === "function") renderFamily();
     var set = function(id, val){ var el = $(id); if (el) el.value = val; };

@@ -83,8 +83,8 @@ const insertAssetRow = async ({ userId, profileId, name, tag, currentValue, cust
       `INSERT INTO assets (
          user_id, profile_id, name, tag, current_value, custom_data,
          category, sip_amount, sip_frequency, sip_expiry_date, expected_return,
-         maturity_date, maturity_value, notes
-       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+         maturity_date, maturity_value, income_amount, income_start_date, income_end_date, notes, start_date
+       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
       [
         userId,
         profileId,
@@ -99,7 +99,11 @@ const insertAssetRow = async ({ userId, profileId, name, tag, currentValue, cust
         extras.expected_return ?? null,
         extras.maturity_date || null,
         numOrNull(extras.maturity_value),
+        numOrNull(extras.income_amount),
+        extras.income_start_date || null,
+        extras.income_end_date || null,
         extras.notes || null,
+        extras.start_date || null,
       ]
     );
   } catch (error) {
@@ -1524,7 +1528,11 @@ router.post('/asset', [
         expected_return: req.body.expected_return,
         maturity_date: req.body.maturity_date,
         maturity_value: req.body.maturity_value,
+        income_amount: req.body.income_amount,
+        income_start_date: req.body.income_start_date,
+        income_end_date: req.body.income_end_date,
         notes: req.body.notes,
+        start_date: req.body.start_date,
       },
     });
 
@@ -1638,8 +1646,8 @@ router.put('/asset/:assetId', [
       values.push(asJson(custom_data));
       paramCount++;
     }
-    const extraAssetFields = ['category', 'sip_amount', 'sip_frequency', 'sip_expiry_date', 'expected_return', 'maturity_date', 'maturity_value', 'notes'];
-    const numericAssetFields = new Set(['sip_amount', 'expected_return', 'maturity_value']);
+    const extraAssetFields = ['category', 'sip_amount', 'sip_frequency', 'sip_expiry_date', 'expected_return', 'maturity_date', 'maturity_value', 'income_amount', 'income_start_date', 'income_end_date', 'notes', 'start_date'];
+    const numericAssetFields = new Set(['sip_amount', 'expected_return', 'maturity_value', 'income_amount']);
     extraAssetFields.forEach((key) => {
       if (req.body[key] !== undefined) {
         updates.push(`${key} = $${paramCount}`);

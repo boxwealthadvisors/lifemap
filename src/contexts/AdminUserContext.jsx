@@ -7,9 +7,9 @@ export const useAdminUser = () => {
   return context; // Returns { userId } or null
 };
 
-export const AdminUserProvider = ({ userId, children }) => {
+export const AdminUserProvider = ({ userId, clientName, onClientUpdated, children }) => {
   return (
-    <AdminUserContext.Provider value={{ userId }}>
+    <AdminUserContext.Provider value={{ userId, clientName, onClientUpdated }}>
       {children}
     </AdminUserContext.Provider>
   );

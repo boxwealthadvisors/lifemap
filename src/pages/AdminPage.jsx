@@ -96,6 +96,10 @@ export default function AdminPage() {
         clientId={selectedClient.id}
         clientName={selectedClient.name || selectedClient.email}
         onBack={() => setSelectedClient(null)}
+        onClientUpdated={(updated) => {
+          setSelectedClient((prev) => (prev ? { ...prev, ...updated } : prev));
+          setClients((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+        }}
       />
     );
   }

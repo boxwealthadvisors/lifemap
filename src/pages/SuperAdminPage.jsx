@@ -153,6 +153,10 @@ export default function SuperAdminPage() {
         clientId={selectedClient.id}
         clientName={selectedClient.name || selectedClient.email}
         onBack={() => setSelectedClient(null)}
+        onClientUpdated={(updated) => {
+          setSelectedClient((prev) => (prev ? { ...prev, ...updated } : prev));
+          setUsers((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+        }}
       />
     );
   }

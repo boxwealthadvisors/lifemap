@@ -83,7 +83,7 @@ function loanEndYear(loan) {
 }
 
 export function splitAssets(assets) {
-  const rows = asList(assets, 'assets')
+  const rows = asList(assets, 'assets').filter((a) => !isFutureStart(assetStartRaw(a)))
   const financial = rows
     .filter((a) => (a.tag || '') !== 'Personal')
     .reduce((s, a) => s + num(a.current_value ?? a.val), 0)
@@ -93,23 +93,135 @@ export function splitAssets(assets) {
   return { financial, personal, total: financial + personal }
 }
 
-/* A contracted maturity value is a known future inflow rather than a projection, so the
-   FP engine needs the calendar year it lands in, today's value, and the promised amount.
-   Rows with a maturity date but no contracted amount are left out: compounding them at the
-   plan's blended return through maturity is already the right assumption. */
+export function isCashCategory(cat) {
+  return /cash/i.test(String(cat || ''))
+}
+
+export function isIncomeFundCategory(cat) {
+  return /income\s*fund/i.test(String(cat || ''))
+}
+
+export function calendarYearsFromNow(raw) {
+  if (raw == null || raw === '') return null
+  const y = new Date(raw).getFullYear()
+  if (!Number.isFinite(y)) return null
+  return y - new Date().getFullYear()
+}
+
+export function assetStartYear(raw) {
+  const y = calendarYearsFromNow(raw)
+  if (y == null) return 0
+  return Math.max(0, y)
+}
+
+function assetStartRaw(a) {
+  const cd = a?.custom_data || {}
+  return a?.start_date ?? cd.startDate ?? a?.start
+}
+
+export function isFutureStart(raw) {
+  return assetStartYear(raw) > 0
+}
+
+/* Cash on the register is one shared 0% pool, including every Cash-category row. */
+export function cashHoldings(assets) {
+  return asList(assets, 'assets')
+    .filter((a) => isCashCategory(a.category || a.custom_data?.cat || a.cat))
+    .filter((a) => (a.tag || '') !== 'Personal')
+    .reduce((s, a) => s + num(a.current_value ?? a.val), 0)
+}
+
+/* Dated holdings leave the growing pool on the maturity date and land in cash.
+   A contracted maturity value is the amount that moves; otherwise the engine
+   compounds today's value at the plan return until that date. */
 export function assetMaturityRows(assets) {
   const now = new Date().getFullYear()
   return asList(assets, 'assets')
     .filter((a) => (a.tag || '') !== 'Personal')
+    .filter((a) => !isCashCategory(a.category || a.custom_data?.cat || a.cat))
+    .filter((a) => !isIncomeFundCategory(a.category || a.custom_data?.cat || a.cat))
     .map((a) => {
       const cd = a.custom_data || {}
       const raw = a.maturity_date ?? cd.maturityDate
-      const promised = num(a.maturity_value ?? cd.maturityValue)
-      if (!raw || promised <= 0) return null
+      if (!raw) return null
       const iso = String(raw).match(/^(\d{4})-\d{2}-\d{2}/)
       const year = iso ? Number(iso[1]) : new Date(raw).getFullYear()
       if (!Number.isFinite(year)) return null
-      return { y: year - now, v: num(a.current_value ?? a.val), mval: promised }
+      const startY = assetStartYear(assetStartRaw(a))
+      const amount = num(a.current_value ?? a.val)
+      return {
+        y: year - now,
+        startY,
+        v: startY > 0 ? 0 : amount,
+        buy: startY > 0 ? amount : 0,
+        mval: num(a.maturity_value ?? cd.maturityValue),
+      }
+    })
+    .filter(Boolean)
+}
+
+export function incomeFundRows(assets) {
+  return asList(assets, 'assets')
+    .filter((a) => (a.tag || '') !== 'Personal')
+    .filter((a) => isIncomeFundCategory(a.category || a.custom_data?.cat || a.cat))
+    .map((a) => {
+      const cd = a.custom_data || {}
+      const matY = calendarYearsFromNow(a.maturity_date ?? cd.maturityDate)
+      const incFrom = calendarYearsFromNow(a.income_start_date ?? cd.incomeStartDate)
+      const incTo = calendarYearsFromNow(a.income_end_date ?? cd.incomeEndDate)
+      const expY = calendarYearsFromNow(a.sip_expiry_date ?? cd.sipExpiryDate)
+      const retRaw = a.expected_return ?? cd.expectedReturn
+      const retN = Number(retRaw)
+      const ret = Number.isFinite(retN) ? (retN > 0 && retN <= 1 ? retN * 100 : retN) : 4.4
+      const startY = assetStartYear(assetStartRaw(a))
+      const amount = num(a.current_value ?? a.val)
+      return {
+        startY,
+        v: startY > 0 ? 0 : amount,
+        buy: startY > 0 ? amount : 0,
+        ret,
+        sip: num(a.sip_amount ?? cd.sipAmount ?? a.sip),
+        per: ({ Monthly: 12, Quarterly: 4, 'Half-yearly': 2, Yearly: 1, 'One-time': 0 }[a.sip_frequency || cd.sipFrequency || a.freq] || 0),
+        sipRun: expY == null ? null : Math.max(0, expY),
+        inc: num(a.income_amount ?? cd.incomeAmount ?? a.inc),
+        incFrom: incFrom == null ? 999 : incFrom,
+        incTo: incTo == null ? -1 : incTo,
+        matY: matY == null ? Infinity : matY,
+        mval: num(a.maturity_value ?? cd.maturityValue ?? a.mval),
+      }
+    })
+}
+
+/* Future holdings that are not dated and not income funds: they leave cash
+   on the start year and then grow at their own expected return. */
+export function plannedGrowRows(assets) {
+  return asList(assets, 'assets')
+    .filter((a) => (a.tag || '') !== 'Personal')
+    .filter((a) => !isCashCategory(a.category || a.custom_data?.cat || a.cat))
+    .filter((a) => !isIncomeFundCategory(a.category || a.custom_data?.cat || a.cat))
+    .filter((a) => !(a.maturity_date || a.custom_data?.maturityDate))
+    .map((a) => {
+      const startY = assetStartYear(assetStartRaw(a))
+      const v = num(a.current_value ?? a.val)
+      if (startY <= 0 || v <= 0) return null
+      const retRaw = a.expected_return ?? a.custom_data?.expectedReturn
+      const retN = Number(retRaw)
+      const ret = Number.isFinite(retN) ? (retN > 0 && retN <= 1 ? retN * 100 : retN) : 11
+      return { y: startY, v, ret }
+    })
+    .filter(Boolean)
+}
+
+/* Every future non-cash row draws this amount from cash on its start year,
+   including personal purchases that never enter the freedom pool. */
+export function plannedCashDraws(assets) {
+  return asList(assets, 'assets')
+    .filter((a) => !isCashCategory(a.category || a.custom_data?.cat || a.cat))
+    .map((a) => {
+      const startY = assetStartYear(assetStartRaw(a))
+      const v = num(a.current_value ?? a.val)
+      if (startY <= 0 || v <= 0) return null
+      return { y: startY, v }
     })
     .filter(Boolean)
 }

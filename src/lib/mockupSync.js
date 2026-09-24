@@ -3,7 +3,14 @@ import {
   annualAmount,
   asList,
   assetMaturityRows,
+  cashHoldings,
   combinedAssets,
+  incomeFundRows,
+  isCashCategory,
+  isFutureStart,
+  isIncomeFundCategory,
+  plannedCashDraws,
+  plannedGrowRows,
   combinedWorkUnassigned,
   floorLump,
   fpEditableExpenses,
@@ -44,6 +51,10 @@ export function emptyMockupState(page) {
         finAssets: 0,
         personalAssets: 0,
         assetMaturities: [],
+        incomeFunds: [],
+        plannedGrows: [],
+        plannedDraws: [],
+        cashNow: 0,
         loans: [],
         goals: [],
         exp: [],
@@ -318,6 +329,10 @@ export async function loadMockupState(page, userId, options = {}) {
         finAssets: assetsCombined.financial,
         personalAssets: assetsCombined.personal,
         assetMaturities: assetMaturityRows(assetsRes),
+        incomeFunds: incomeFundRows(assetsRes),
+        plannedGrows: plannedGrowRows(assetsRes),
+        plannedDraws: plannedCashDraws(assetsRes),
+        cashNow: cashHoldings(assetsRes),
         loans: asList(loansRes, 'loans').map((l) => ({
           id: l.id,
           n: l.loanName || l.name || l.type || 'Loan',
@@ -362,15 +377,26 @@ export async function loadMockupState(page, userId, options = {}) {
       return {
         id: a.id,
         name: a.name || '',
-        cat: a.category || cd.cat || cd.subType || 'Other',
+        cat: (() => {
+          const raw = a.category || cd.cat || cd.subType || 'Other'
+          if (isCashCategory(raw)) return 'Cash'
+          if (isIncomeFundCategory(raw)) return 'Income fund'
+          return raw
+        })(),
         tag: a.tag || 'Investment',
         val: num(a.current_value),
         sip: num(a.sip_amount ?? cd.sipAmount),
         freq: a.sip_frequency || cd.sipFrequency || 'Monthly',
         exp: a.sip_expiry_date || cd.sipExpiryDate || '',
-        ret: asPct(a.expected_return ?? cd.expectedReturn, 6),
+        ret: isCashCategory(a.category || cd.cat || cd.subType)
+          ? 0
+          : asPct(a.expected_return ?? cd.expectedReturn, isIncomeFundCategory(a.category || cd.cat || cd.subType) ? 4.4 : 6),
+        start: asDateInput(a.start_date ?? cd.startDate),
         mat: asDateInput(a.maturity_date ?? cd.maturityDate),
         mval: num(a.maturity_value ?? cd.maturityValue),
+        inc: num(a.income_amount ?? cd.incomeAmount),
+        incFrom: asDateInput(a.income_start_date ?? cd.incomeStartDate),
+        incTo: asDateInput(a.income_end_date ?? cd.incomeEndDate),
         notes: a.notes || cd.notes || '',
         earmarks: (cd.goalEarmarks || []).map((e) => ({
           id: e.goalId || e.id,
@@ -713,13 +739,17 @@ export async function saveMockupState(page, userId, state, options = {}) {
         name: row.name || 'Asset',
         tag: row.tag || 'Investment',
         current_value: num(row.val),
-        category: row.cat || 'Other',
+        category: isCashCategory(row.cat) ? 'Cash' : (isIncomeFundCategory(row.cat) ? 'Income fund' : (row.cat || 'Other')),
         sip_amount: num(row.sip),
         sip_frequency: row.freq || 'Monthly',
         sip_expiry_date: row.exp || null,
-        expected_return: asRate(row.ret, 0.06),
+        expected_return: isCashCategory(row.cat) ? 0 : asRate(row.ret, 0.06),
+        start_date: row.start || null,
         maturity_date: row.mat || null,
         maturity_value: num(row.mval) > 0 ? num(row.mval) : null,
+        income_amount: num(row.inc) > 0 ? num(row.inc) : null,
+        income_start_date: row.incFrom || null,
+        income_end_date: row.incTo || null,
         notes: row.notes || '',
         custom_data: {
           ...(prior?.custom_data || {}),
@@ -727,8 +757,12 @@ export async function saveMockupState(page, userId, state, options = {}) {
           sipFrequency: row.freq || 'Monthly',
           sipExpiryDate: row.exp || '',
           expectedReturn: num(row.ret),
+          startDate: row.start || '',
           maturityDate: row.mat || '',
           maturityValue: num(row.mval),
+          incomeAmount: num(row.inc),
+          incomeStartDate: row.incFrom || '',
+          incomeEndDate: row.incTo || '',
           notes: row.notes || '',
           cat: row.cat || 'Other',
           goalEarmarks: (row.tag || '') === 'Personal' ? [] : asGoalEarmarks(row.earmarks),
@@ -737,8 +771,9 @@ export async function saveMockupState(page, userId, state, options = {}) {
     })
     await syncGoalLinksFromAssets(api, state.ROWS || [])
     const rows = state.ROWS || []
-    const fin = rows.filter((r) => (r.tag || '') !== 'Personal').reduce((s, r) => s + num(r.val), 0)
-    const personal = rows.filter((r) => (r.tag || '') === 'Personal').reduce((s, r) => s + num(r.val), 0)
+    const owned = rows.filter((r) => !isFutureStart(r.start))
+    const fin = owned.filter((r) => (r.tag || '') !== 'Personal').reduce((s, r) => s + num(r.val), 0)
+    const personal = owned.filter((r) => (r.tag || '') === 'Personal').reduce((s, r) => s + num(r.val), 0)
     const profileRes = await api.getFinancialProfile().catch(() => null)
     const current = profileRes?.profile
     const lump = floorLump(current?.total_asset_gross_market_value, fin + personal)

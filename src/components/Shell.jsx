@@ -75,6 +75,7 @@ const ADMIN_SECTIONS = {
   loans: PAGE_SECTIONS['/loans'],
   expenses: PAGE_SECTIONS['/expenses'],
   insurance: PAGE_SECTIONS['/insurance'],
+  profile: PAGE_SECTIONS['/profile'],
 }
 
 function BrandMark({ to = '/' }) {
@@ -100,7 +101,7 @@ export default function Shell({ children, adminMode = false, activeSection, onSe
 
   const isMainPage = adminMode ? activeSection === 'dashboard' : location.pathname === '/'
   const hideExtraChrome = adminMode
-    ? activeSection === 'insurance'
+    ? ['insurance', 'profile'].includes(activeSection)
     : ['/profile', '/growth-assumptions', '/insurance'].includes(location.pathname)
   const shouldShowChart = !isMainPage && isChartVisible && !hideExtraChrome
 

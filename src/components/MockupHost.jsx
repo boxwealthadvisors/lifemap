@@ -200,7 +200,10 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
         return
       }
       if (data.type === 'auth') {
-        if (isAdminMode) return
+        if (isAdminMode) {
+          if (onNavigate) onNavigate('/profile')
+          return
+        }
         if (isAuthenticated) {
           navigate('/profile')
           return

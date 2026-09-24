@@ -93,6 +93,10 @@ a{text-decoration:none; color:inherit}
 .phead h1{font-size:25px}
 .phead p{margin:3px 0 0; color:var(--muted); font-size:14px; max-width:78ch}
 .card{background:#fff; border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow)}
+.cashwarn{display:none; margin:0 0 14px; padding:11px 14px; border-radius:10px;
+  background:#fff4f2; border:1px solid #f0c2bc; color:#8c2f28; font-size:13.5px; line-height:1.5; font-weight:600}
+.cashwarn.on{display:block}
+.cashwarn b{font-weight:800}
 
 /* donut card — one full-width section */
 .mixcard{padding:18px 22px 20px; margin-bottom:16px}
@@ -363,7 +367,8 @@ td.rt{text-align:right}
   <div class="phead">
     <h1>What you own
       <button class="pmore" type="button" aria-expanded="false" aria-controls="phead-desc" aria-label="Show what this page is for"></button></h1>
-    <div class="pdesc" id="phead-desc"><p>Every holding, in one register &mdash; investments, retirement, emergency and personal assets such as a home or gold. Use + Add personal asset to start a row already tagged Personal; it stays in the same list so you can fill investments and personal assets together. The mix and the growth path below rebuild themselves as you add rows, and choosing a category fills in a historical return you can then override.</p></div>
+    <div class="pdesc" id="phead-desc"><p>Every holding, in one register &mdash; investments, retirement, emergency, personal assets such as a home or gold, cash, and income funds. Leave Start date blank for something you already own. Set it in the future to plan a purchase: that amount leaves the shared Cash pool on that date and must be covered by cash already there plus redemptions and contributions. Dated holdings and income-fund payouts land in that same pool. An income fund&rsquo;s expected return is the XIRR of its cash flows, measured from today or from the start date if that is later.</p></div>
+    <div class="cashwarn" id="cash-warn" role="alert"></div>
   </div>
 
   <!-- ===== asset mix ===== -->
@@ -414,7 +419,7 @@ td.rt{text-align:right}
     </div>
     <div class="gleg" id="gleg"></div>
     <div class="gfoot" id="g-foot">
-      Each band is one slice of the mix above, compounded at the return you set in the register and topped up by any SIP until its expiry date. Change a value, a rate or a date below and this redraws.
+      Each band is one holding, compounded at the return you set and topped up by any SIP until its expiry date. Income-fund income and the terminal lumpsum leave that band and join the shared Cash line. Change a value, a rate or a date below and this redraws.
     </div>
   </div>
 
@@ -432,6 +437,8 @@ td.rt{text-align:right}
         <button class="ghost" id="btn-import">Import Excel / CSV</button>
         <input type="file" id="file-import" accept=".csv,.txt,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
         <button class="ghost" id="btn-add-personal">+ Add personal asset</button>
+        <button class="ghost" id="btn-add-income">+ Add income fund</button>
+        <button class="ghost" id="btn-add-cash">+ Add cash</button>
         <button class="ghost primary" id="btn-add">+ Add asset</button>
       </div>
     </div>
@@ -443,11 +450,15 @@ td.rt{text-align:right}
             <th class="stick">Name</th>
             <th>Category</th>
             <th>Purpose</th>
+            <th>Start date</th>
             <th style="text-align:right">Current value</th>
             <th style="text-align:right">Expected return</th>
             <th style="text-align:right">SIP amount</th>
             <th>SIP frequency</th>
             <th>SIP expiry</th>
+            <th style="text-align:right">Income payout</th>
+            <th>Income from</th>
+            <th>Income to</th>
             <th>Maturity date</th>
             <th style="text-align:right">Maturity value</th>
             <th style="text-align:right">Value in 10 yrs</th>
@@ -463,9 +474,11 @@ td.rt{text-align:right}
     <div class="addbar">
       <button class="addrow" id="btn-add2">+ Add another asset</button>
       <button class="addrow" id="btn-add-personal2">+ Add personal asset</button>
+      <button class="addrow" id="btn-add-income2">+ Add income fund</button>
+      <button class="addrow" id="btn-add-cash2">+ Add cash</button>
     </div>
     <div class="foot">
-      Expected returns are long-run historical averages for each asset class, filled in as a starting point and fully editable. They are not forecasts, and your own holdings may behave very differently. &ldquo;Value in 10 years&rdquo; compounds the current value at that rate and adds SIP contributions until the expiry date you set. Set a maturity date for anything that ends on a known day &mdash; an FD, PPF, NPS, or an endowment policy &mdash; and the row stops compounding there instead of growing forever; the proceeds simply sit as cash until a goal spends them. If the payout is contractually fixed, type it into maturity value and the expected return becomes the rate that amount implies.
+      Expected returns are long-run historical averages for each asset class, filled in as a starting point and fully editable. They are not forecasts, and your own holdings may behave very differently. For an income fund, Expected return is the XIRR of the premiums, income payouts and maturity lumpsum, measured from the start date. A future start is a planned investment: Current value is the amount that will leave Cash on that date. If redemptions or contributions later fall short, Cash can go negative and this page alerts immediately.
     </div>
   </div>
 
@@ -492,9 +505,14 @@ const CATS = [
   {n:"Gold / SGB",              ret:9.0,  c:"#e9a23b"},
   {n:"REITs / InvITs",          ret:8.5,  c:"#d98f5a"},
   {n:"Insurance-linked",        ret:5.0,  c:"#94a3bd"},
-  {n:"Cash / savings",          ret:3.5,  c:"#b6c0d0"},
+  {n:"Income fund",             ret:4.4,  c:"#c94f70"},
+  {n:"Cash",                    ret:0,    c:"#5a6e8c"},
   {n:"Other",                   ret:6.0,  c:"#cbd3e0"}
 ];
+const CASH_COLOR = "#5a6e8c";
+const isCashName = n => /cash/i.test(String(n || ""));
+const isCash = r => isCashName(r && r.cat);
+const isIncomeFund = r => /income\s*fund/i.test(String(r && r.cat || ""));
 const TAGS = [
   {n:"Investment", c:"#2f6fd0", d:"Money working towards future goals."},
   {n:"Retirement", c:"#0d8a78", d:"Earmarked for life after you stop earning."},
@@ -511,7 +529,7 @@ const ASSET_COLORS = [
   "#17becf", "#bcbd22", "#6b6ecf", "#ff6f61", "#2ca02c", "#9467bd"
 ];
 
-const catOf = n => CATS.find(c => c.n === n) || CATS[CATS.length-1];
+const catOf = n => isCashName(n) ? CATS.find(c => c.n === "Cash") : (CATS.find(c => c.n === n) || CATS[CATS.length-1]);
 const tagOf = n => TAGS.find(t => t.n === n) || TAGS[3];
 
 /* ================= STATE ================= */
@@ -521,7 +539,8 @@ let ROWS = [
   {name:"Flat, Sector 62 Noida", cat:"Real estate",           tag:"Personal",   val:4200000, sip:0,     freq:"Monthly", exp:"",           ret:8.0,  notes:"Self-occupied", saved:true},
   {name:"PPF account",           cat:"PPF / EPF",             tag:"Retirement", val:680000,  sip:12500, freq:"Monthly", exp:"2040-03-31", ret:7.1,  mat:"2040-03-31", notes:"", saved:true},
   {name:"Gold and SGB",          cat:"Gold / SGB",            tag:"Personal",   val:320000,  sip:0,     freq:"Yearly",  exp:"",           ret:9.0,  notes:"", saved:true},
-  {name:"Emergency FD",          cat:"Fixed deposits",        tag:"Emergency",  val:250000,  sip:0,     freq:"Monthly", exp:"",           ret:6.5,  notes:"3 months of expenses", saved:true}
+  {name:"Emergency FD",          cat:"Fixed deposits",        tag:"Emergency",  val:250000,  sip:0,     freq:"Monthly", exp:"",           ret:6.5,  notes:"3 months of expenses", saved:true},
+  {name:"Cash",                  cat:"Cash",                  tag:"Emergency",  val:150000,  sip:0,     freq:"Monthly", exp:"",           ret:0,    notes:"Shared cash pool — maturities land here", saved:true}
 ];
 let UNASSIGNED = 0;           /* lump figure carried over from the landing page, not yet itemised */
 let GOALS = [];
@@ -542,22 +561,38 @@ function fmt(n){
   return s+"\u20B9"+a;
 }
 const full = n => (n<0?"\u2212":"")+"\u20B9"+Math.abs(Math.round(n)).toLocaleString("en-IN");
-const totalVal = () => ROWS.reduce((t,r) => t + num(r.val), 0) + UNASSIGNED;
+const startYears = r => {
+  if(isCash(r)) return 0;
+  const y = calYears(r.start);
+  return (y == null || y < 0) ? 0 : y;
+};
+const isPlanned = r => startYears(r) > 0;
+const ownedVal = r => isPlanned(r) ? 0 : num(r.val);
+const totalVal = () => ROWS.reduce((t,r) => t + ownedVal(r), 0) + UNASSIGNED;
 const esc = s => String(s??"").replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 
 /* years of SIP still to run, capped at the horizon being drawn */
+function originDate(r){
+  if(isPlanned(r) && r.start){
+    const d = new Date(r.start);
+    if(!isNaN(d.getTime())) return d;
+  }
+  return new Date();
+}
 function sipYears(r, cap){
   const per = PER_YEAR[r.freq] || 0;
   if(num(r.sip) <= 0 || per === 0) return 0;
   if(!r.exp) return cap;                                  /* open-ended: runs the whole view */
-  const y = (new Date(r.exp) - new Date()) / (365.25*24*3600*1000);
+  const y = (new Date(r.exp) - originDate(r)) / (365.25*24*3600*1000);
   return Math.max(0, Math.min(cap, y));
 }
 const RET_DERIVED_HINT = "Solved from the maturity value you entered. Clear that cell to set a return by hand.";
+const CASH_RET_HINT = "Cash does not grow. Matured holdings land in this same pool.";
+const INCOME_RET_HINT = "XIRR of the premiums, income payouts and maturity value, measured from the start date (or today if blank).";
 /* years from today to the maturity date; Infinity when the row never matures */
 function maturityYears(r){
   if(!r.mat) return Infinity;
-  const y = (new Date(r.mat) - new Date()) / (365.25*24*3600*1000);
+  const y = (new Date(r.mat) - originDate(r)) / (365.25*24*3600*1000);
   if(!isFinite(y)) return Infinity;
   /* a date within a week of a whole year belongs on that year of the chart grid,
      otherwise a 10-year policy measures as 10.0027 years and matures in year 11 */
@@ -573,7 +608,6 @@ function grownPath(r, years, rate){
   const out = [num(r.val)];
   let v = num(r.val);
   for(let t=0; t<years; t++){
-    /* past maturity the proceeds are cash: they stop compounding, they do not vanish */
     if(t >= mat){ out.push(v); continue; }
     const step = Math.min(1, mat - t);
     v = v*Math.pow(1+g, step) + (t < run ? annual : 0);
@@ -581,18 +615,185 @@ function grownPath(r, years, rate){
   }
   return out;
 }
-/* value of one row at each year 0..years */
+function calYears(raw){
+  if(!raw) return null;
+  const y = new Date(raw).getFullYear() - new Date().getFullYear();
+  return isFinite(y) ? y : null;
+}
+function incomeWindow(r){
+  const amt = num(r.inc);
+  if(amt <= 0) return null;
+  const from = calYears(r.incFrom);
+  if(from == null) return null;
+  const matY = calYears(r.mat);
+  const toRaw = calYears(r.incTo);
+  const to = toRaw != null ? toRaw : (matY == null ? from : matY - 1);
+  return { from, to, amt };
+}
+function maturityPayout(r){
+  const mat = maturityYears(r);
+  if(!isFinite(mat)) return 0;
+  if(num(r.mval) > 0) return num(r.mval);
+  const years = Math.max(0, Math.ceil(mat));
+  return grownPath(r, years, r.ret)[years] || 0;
+}
+function incomeFundFlows(r, years){
+  const g = num(r.ret)/100, per = PER_YEAR[r.freq] || 0;
+  const annual = num(r.sip) * per;
+  const sipUntil = calYears(r.exp);
+  const win = incomeWindow(r);
+  const matY = calYears(r.mat);
+  const startY = startYears(r);
+  const residual = [];
+  const cashAdd = new Array(years+1).fill(0);
+  let v = 0;
+  for(let y=0; y<=years; y++){
+    if(y < startY){ residual.push(0); continue; }
+    if(matY != null && y > matY){ residual.push(0); continue; }
+    if(y === startY) v = num(r.val);
+    else v = v*(1+g);
+    if(annual > 0 && sipUntil != null && y >= startY && y <= sipUntil && (matY == null || y < matY)) v += annual;
+    if(win && y >= win.from && y <= win.to && (matY == null || y < matY)){
+      cashAdd[y] += win.amt;
+      v = Math.max(0, v - win.amt);
+    }
+    if(matY != null && y === matY){
+      cashAdd[y] += num(r.mval) > 0 ? num(r.mval) : v;
+      v = 0;
+    }
+    residual.push(v);
+  }
+  return { residual, cashAdd };
+}
+/* value of one row at each year 0..years. Cash stays in the shared pool;
+   a dated holding drops to zero on the maturity year as its payout moves there. */
 function pathOf(r, years){
-  const out = grownPath(r, years, r.ret);
-  const mat = maturityYears(r), target = num(r.mval);
-  if(!isFinite(mat) || target <= 0) return out;
-  /* a guaranteed payout is a fact, not a projection: pin the curve to it from maturity on */
-  for(let y = Math.ceil(mat); y <= years; y++) out[y] = target;
+  if(isCash(r)){
+    const per = PER_YEAR[r.freq] || 0;
+    const annual = num(r.sip) * per;
+    const run = sipYears(r, years);
+    const out = [num(r.val)];
+    let v = num(r.val);
+    for(let t=0; t<years; t++){ v = v + (t < run ? annual : 0); out.push(v); }
+    return out;
+  }
+  if(isIncomeFund(r) && (num(r.inc) > 0 || r.mat)){
+    return incomeFundFlows(r, years).residual;
+  }
+  const start = startYears(r);
+  const innerYears = Math.max(0, years - start);
+  const inner = grownPath(r, innerYears, r.ret);
+  const mat = maturityYears(r);
+  if(isFinite(mat)){
+    for(let y = Math.ceil(mat); y <= innerYears; y++) inner[y] = 0;
+  }
+  if(start <= 0) return inner;
+  const out = new Array(start).fill(0).concat(inner);
+  while(out.length < years+1) out.push(out[out.length-1] || 0);
+  return out.slice(0, years+1);
+}
+function plannedBuyAt(r){
+  if(isCash(r) || !isPlanned(r)) return 0;
+  return num(r.val);
+}
+/* One cash line: register cash, plus redemptions, minus planned purchases. */
+function cashPoolPath(years){
+  const out = new Array(years+1).fill(0);
+  ROWS.filter(isCash).forEach(r => {
+    pathOf(r, years).forEach((v,i) => { out[i] += v; });
+  });
+  const payout = new Array(years+1).fill(0);
+  const buy = new Array(years+1).fill(0);
+  ROWS.filter(r => !isCash(r)).forEach(r => {
+    const start = startYears(r);
+    if(start > 0 && start <= years) buy[start] += plannedBuyAt(r);
+    if(isIncomeFund(r) && (num(r.inc) > 0 || r.mat)){
+      incomeFundFlows(r, years).cashAdd.forEach((v,i) => { payout[i] += v; });
+      return;
+    }
+    const mat = maturityYears(r);
+    if(!isFinite(mat)) return;
+    const pay = maturityPayout(r);
+    if(pay <= 0) return;
+    /* maturityYears is measured from the start date for a planned holding */
+    const absMat = start + Math.ceil(mat);
+    if(absMat <= years) payout[absMat] += pay;
+  });
+  let pCum = 0, bCum = 0;
+  for(let i=0;i<=years;i++){
+    pCum += payout[i];
+    bCum += buy[i];
+    out[i] += pCum - bCum;
+  }
   return out;
 }
 const futureValue = (r, years) => pathOf(r, years)[years];
+/* Investor cash flows for an income fund: remaining premiums out, income and
+   the maturity lumpsum in. Current value, if any, is money already tied up today. */
+function incomeFundCashflows(r){
+  const flows = [];
+  const origin = originDate(r);
+  const val = num(r.val);
+  if(val > 0) flows.push({ d: origin, v: -val });
+  const annual = num(r.sip) * (PER_YEAR[r.freq] || 0);
+  const sipUntil = calYears(r.exp);
+  if(annual > 0 && r.exp && sipUntil != null){
+    const last = new Date(r.exp);
+    if(!isNaN(last.getTime())){
+      for(let y=0; y<=sipUntil; y++){
+        const d = new Date(last);
+        d.setFullYear(last.getFullYear() - (sipUntil - y));
+        if(d.getFullYear() < origin.getFullYear()) continue;
+        flows.push({ d, v: -annual });
+      }
+    }
+  }
+  const win = incomeWindow(r);
+  const matY = calYears(r.mat);
+  if(win && r.incFrom){
+    const start = new Date(r.incFrom);
+    const end = r.incTo ? new Date(r.incTo) : start;
+    if(!isNaN(start.getTime()) && !isNaN(end.getTime())){
+      for(let y=start.getFullYear(); y<=end.getFullYear(); y++){
+        if(matY != null && y - new Date().getFullYear() >= matY) break;
+        const d = new Date(start);
+        d.setFullYear(y);
+        if(d.getFullYear() < origin.getFullYear()) continue;
+        flows.push({ d, v: win.amt });
+      }
+    }
+  }
+  if(r.mat && num(r.mval) > 0){
+    const d = new Date(r.mat);
+    if(!isNaN(d.getTime()) && d.getFullYear() >= origin.getFullYear()) flows.push({ d, v: num(r.mval) });
+  }
+  return flows;
+}
+function xirrPct(flows){
+  if(flows.length < 2) return null;
+  if(!flows.some(f => f.v > 0) || !flows.some(f => f.v < 0)) return null;
+  const sorted = flows.slice().sort((a,b) => a.d - b.d);
+  const t0 = sorted[0].d.getTime();
+  const yearMs = 365 * 24 * 3600 * 1000;
+  const npv = rate => sorted.reduce((s,f) => s + f.v / Math.pow(1+rate, (f.d.getTime()-t0)/yearMs), 0);
+  let lo = -0.9, hi = 10, nLo = npv(lo), nHi = npv(hi);
+  if(!(isFinite(nLo) && isFinite(nHi))) return null;
+  if(nLo * nHi > 0){
+    hi = 50; nHi = npv(hi);
+    if(nLo * nHi > 0) return null;
+  }
+  for(let i=0; i<80; i++){
+    const mid = (lo+hi)/2, n = npv(mid);
+    if(n > 0) lo = mid; else hi = mid;
+  }
+  return Math.round(((lo+hi)/2) * 10000) / 100;
+}
+function incomeFundIrr(r){
+  return xirrPct(incomeFundCashflows(r));
+}
 /* the return a contracted maturity value implies, given the money actually going in */
 function impliedReturn(r){
+  if(isIncomeFund(r)) return incomeFundIrr(r);
   const mat = maturityYears(r), target = num(r.mval);
   if(!isFinite(mat) || mat <= 0 || target <= 0) return null;
   const years = Math.ceil(mat);
@@ -606,14 +807,24 @@ function impliedReturn(r){
   }
   return Math.round(((lo+hi)/2) * 100) / 100;
 }
-/* keep the return cell in step with a hand-entered maturity value */
+/* keep the return cell in step with contracted cash flows */
 function syncImpliedReturn(r){
+  if(isCash(r)) return null;
   const implied = impliedReturn(r);
   if(implied != null) r.ret = implied;
   return implied;
 }
-const returnIsDerived = r => isFinite(maturityYears(r)) && num(r.mval) > 0;
-const monthlySip = () => ROWS.reduce((t,r) => t + (num(r.sip) * (PER_YEAR[r.freq]||0) / 12), 0);
+const returnIsDerived = r => {
+  if(isCash(r)) return false;
+  if(isIncomeFund(r)) return incomeFundIrr(r) != null;
+  return isFinite(maturityYears(r)) && num(r.mval) > 0;
+};
+function retHint(r){
+  if(isCash(r)) return CASH_RET_HINT;
+  if(isIncomeFund(r)) return INCOME_RET_HINT;
+  return RET_DERIVED_HINT;
+}
+const monthlySip = () => ROWS.filter(r => !isPlanned(r)).reduce((t,r) => t + (num(r.sip) * (PER_YEAR[r.freq]||0) / 12), 0);
 function projectionHtml(r){
   const fv = futureValue(r, 10);
   const gain = fv - num(r.val);
@@ -643,7 +854,7 @@ function buckets(by){
   ROWS.forEach(r => {
     const key = by === "cat" ? (catOf(r.cat).n) : (tagOf(r.tag).n);
     const b = out.find(o => o.n === key);
-    if(b) b.v += num(r.val);
+    if(b) b.v += ownedVal(r);
   });
   if(UNASSIGNED > 0) out.push({n:"Not yet itemised", c:"#dfe5ee", v:UNASSIGNED,
     d:"Carried over from your snapshot. Break it into rows to see it here."});
@@ -737,10 +948,10 @@ function drawDonut(){
 const GW=1400, GH=320, GL=78, GR=20, GT=16, GB=38;    /* viewBox + plot padding */
 const PW = GW-GL-GR, PH = GH-GT-GB;
 
-/* One line per asset row. Each asset gets its own clearly distinguishable colour. */
+/* One line per non-cash row, plus a single Cash pool that collects maturities. */
 function growthSeries(years){
   const used = new Map();
-  return ROWS.map((r, idx) => {
+  const series = ROWS.filter(r => !isCash(r)).map((r, idx) => {
     const base = (r.name || `Asset ${idx+1}`).trim() || `Asset ${idx+1}`;
     const count = (used.get(base) || 0) + 1;
     used.set(base, count);
@@ -751,6 +962,9 @@ function growthSeries(years){
       pts: pathOf(r, years)
     };
   }).filter(s => s.pts.some(v => v > 0));
+  const cashPts = cashPoolPath(years);
+  if(cashPts.some(v => Math.abs(v) > 0.5)) series.push({ n:"Cash", c:CASH_COLOR, pts:cashPts });
+  return series;
 }
 function niceStep(max){
   const raw = max/4, p = Math.pow(10, Math.floor(Math.log10(raw||1)));
@@ -1055,22 +1269,27 @@ function drawTable(){
   rows.forEach(({r,i}, vi) => {
     const tr = document.createElement("tr");
     const cat = catOf(r.cat), tag = tagOf(r.tag);
-    const retLocked = returnIsDerived(r);
+    if(isCash(r)){ r.ret = 0; r.cat = "Cash"; }
+    const retLocked = returnIsDerived(r) || isCash(r);
     /* re-solve on every draw so a row loaded from the database can never show a rate
-       that disagrees with its own maturity value */
-    if(retLocked) syncImpliedReturn(r);
+       that disagrees with its contracted cash flows. */
+    if(returnIsDerived(r)) syncImpliedReturn(r);
     tr.innerHTML = `
       <td class="stick"><input class="cell name" data-k="name" value="${esc(r.name)}" placeholder="Name this asset"></td>
       <td><button type="button" class="dd catpick" data-dd="cat" aria-haspopup="listbox" aria-expanded="false">
             <span class="sw" style="background:${cat.c}"></span><span class="lbl">${esc(cat.n)}</span></button></td>
       <td><button type="button" class="dd tagpick" data-dd="tag" aria-haspopup="listbox" aria-expanded="false">
             <span class="sw" style="background:${tag.c}"></span><span class="lbl">${esc(tag.n)}</span></button></td>
-      <td><input class="cell money" data-k="val" type="text" inputmode="decimal" value="${r.val}" placeholder="0"></td>
-      <td><input class="cell money${retLocked ? " derived" : ""}" data-k="ret" type="text" inputmode="decimal" value="${pctStr(r.ret)}"${retLocked ? ` readonly title="${RET_DERIVED_HINT}"` : ""}></td>
-      <td><input class="cell money" data-k="sip" type="text" inputmode="decimal" value="${r.sip}" placeholder="0"></td>
+      <td><input class="cell small" data-k="start" type="date" value="${r.start || ""}" ${isCash(r) ? "disabled" : ""} title="${isCash(r) ? "Cash is already in the pool" : "Blank = already owned. A future date plans a purchase from cash."}"></td>
+      <td><input class="cell money" data-k="val" type="text" inputmode="decimal" value="${r.val}" placeholder="0" title="${isPlanned(r) ? "Amount that will leave cash on the start date" : "Value today"}"></td>
+      <td><input class="cell money${retLocked ? " derived" : ""}" data-k="ret" type="text" inputmode="decimal" value="${pctStr(r.ret)}"${retLocked ? ` readonly title="${retHint(r)}"` : (isIncomeFund(r) ? ` title="${INCOME_RET_HINT}"` : "")}></td>
+      <td><input class="cell money" data-k="sip" type="text" inputmode="decimal" value="${r.sip}" placeholder="0" title="${isIncomeFund(r) ? "Remaining premium, paid each year through SIP expiry" : ""}"></td>
       <td><button type="button" class="dd freqpick" data-dd="freq" aria-haspopup="listbox" aria-expanded="false">
             <span class="lbl">${esc(r.freq)}</span></button></td>
       <td><input class="cell small" data-k="exp" type="date" value="${r.exp}"></td>
+      <td><input class="cell money" data-k="inc" type="text" inputmode="decimal" value="${num(r.inc) > 0 ? r.inc : ""}" placeholder="0" title="Yearly income paid into cash"></td>
+      <td><input class="cell small" data-k="incFrom" type="date" value="${r.incFrom || ""}"></td>
+      <td><input class="cell small" data-k="incTo" type="date" value="${r.incTo || ""}"></td>
       <td><input class="cell small" data-k="mat" type="date" value="${r.mat || ""}"></td>
       <td><input class="cell money" data-k="mval" type="text" inputmode="decimal" value="${num(r.mval) > 0 ? r.mval : ""}" placeholder="0"></td>
       <td class="rt"><span class="proj">${projectionHtml(r)}</span></td>
@@ -1090,16 +1309,16 @@ function drawTable(){
       el.value = pctStr(r.ret);
       el.readOnly = locked;
       el.classList.toggle("derived", locked);
-      if(locked) el.title = RET_DERIVED_HINT; else el.removeAttribute("title");
+      if(locked || isIncomeFund(r)) el.title = retHint(r); else el.removeAttribute("title");
     };
 
     tr.querySelectorAll("[data-k]").forEach(el => {
       el.addEventListener("input", e => {
         const k = e.target.dataset.k;
-        r[k] = ["val","sip","ret","mval"].includes(k) ? num(e.target.value) : e.target.value;
+        r[k] = ["val","sip","ret","mval","inc"].includes(k) ? num(e.target.value) : e.target.value;
         dirty();
-        /* current value, SIP and maturity all feed the implied rate, so re-solve on any of them */
-        if(k === "mat" || k === "mval" || returnIsDerived(r)){ syncImpliedReturn(r); paintRet(); }
+        /* current value, SIP, income dates and maturity all feed the implied rate */
+        if(isIncomeFund(r) || k === "mat" || k === "mval" || returnIsDerived(r)){ syncImpliedReturn(r); paintRet(); }
         const proj = tr.querySelector(".proj");
         if(proj) proj.innerHTML = projectionHtml(r);
         refresh(false);
@@ -1117,8 +1336,10 @@ function drawTable(){
       btn.addEventListener("click", () => ddToggle(btn, opts, r[k], v => {
         if(v === r[k]) return;
         r[k] = v; dirty();
-        /* choosing a category drops in that class's historical return, unless a maturity value fixes it */
-        if(k === "cat" && !returnIsDerived(r)) r.ret = catOf(r.cat).ret;
+        if(k === "cat"){
+          if(isCashName(v)){ r.cat = "Cash"; r.ret = 0; r.mat = ""; r.mval = 0; r.inc = 0; r.incFrom = ""; r.incTo = ""; r.start = ""; }
+          else if(!returnIsDerived(r)) r.ret = catOf(r.cat).ret;
+        }
         if(k === "freq") syncImpliedReturn(r);
         if(k === "tag" && v === "Personal") r.earmarks = [];
         refresh();
@@ -1132,8 +1353,35 @@ function drawTable(){
 }
 
 /* ================= REFRESH ================= */
+function planHorizon(){
+  let h = Math.max(HZ, 20);
+  ROWS.forEach(r => {
+    [startYears(r), calYears(r.mat), calYears(r.incTo), calYears(r.exp)].forEach(y => {
+      if(y != null && isFinite(y)) h = Math.max(h, y);
+    });
+  });
+  return h;
+}
+function cashShortfalls(years){
+  const cash = cashPoolPath(years);
+  const hits = [];
+  const y0 = new Date().getFullYear();
+  cash.forEach((v,i) => { if(v < -0.5) hits.push({ year: y0+i, v }); });
+  return hits;
+}
+function drawCashWarn(){
+  const el = $("cash-warn");
+  if(!el) return;
+  const hits = cashShortfalls(planHorizon());
+  if(!hits.length){ el.classList.remove("on"); el.textContent = ""; return; }
+  const first = hits[0], worst = hits.reduce((a,b) => a.v < b.v ? a : b);
+  el.classList.add("on");
+  el.innerHTML = `Cash goes negative in <b>${first.year}</b> (${fmt(first.v)}).`
+    + (worst.year !== first.year ? ` Lowest point <b>${worst.year}</b> (${fmt(worst.v)}).` : "")
+    + ` A planned investment is larger than cash from redemptions and contributions, or a later change reduced those inflows.`;
+}
 function refresh(redrawTable = true){
-  drawDonut(); drawGrowth();
+  drawDonut(); drawGrowth(); drawCashWarn();
   if(redrawTable) drawTable();
 }
 
@@ -1144,13 +1392,14 @@ document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click"
 }));
 document.querySelectorAll("[data-hz]").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll("[data-hz]").forEach(x => x.classList.remove("on"));
-  b.classList.add("on"); HZ = +b.dataset.hz; drawGrowth();
+  b.classList.add("on"); HZ = +b.dataset.hz; drawGrowth(); drawCashWarn();
 }));
 const addAsset = (tag) => {
   const purpose = tag || "Investment";
   const cat = purpose === "Personal" ? "Other" : "Equity mutual funds";
   ROWS.push({id:"temp_"+Date.now(), name:"", cat, tag: purpose, val:0, sip:0,
-             freq:"Monthly", exp:"", ret:catOf(cat).ret, mat:"", mval:0,
+             freq:"Monthly", exp:"", ret:catOf(cat).ret, start:"", mat:"", mval:0,
+             inc:0, incFrom:"", incTo:"",
              notes:"", earmarks:[], saved:false});
   SEARCH = ""; $("search").value = "";
   /* Keep investments and personal assets in the same list. Only drop a purpose
@@ -1160,10 +1409,51 @@ const addAsset = (tag) => {
   const last = $("tbody").lastElementChild;
   if(last) last.querySelector("input").focus();
 };
+const addCash = () => {
+  SEARCH = ""; if($("search")) $("search").value = "";
+  const existing = ROWS.find(isCash);
+  if(existing){
+    if(FILTER && tagOf(existing.tag).n !== FILTER) setFilter("All purposes");
+    refresh();
+    const row = [...$("tbody").children].find(tr => {
+      const name = tr.querySelector('[data-k="name"]');
+      return name && name.value === (existing.name || "Cash");
+    }) || $("tbody").lastElementChild;
+    const val = row && row.querySelector('[data-k="val"]');
+    if(val) val.focus();
+    return;
+  }
+  ROWS.push({id:"temp_"+Date.now(), name:"Cash", cat:"Cash", tag:"Emergency", val:0, sip:0,
+             freq:"Monthly", exp:"", ret:0, start:"", mat:"", mval:0,
+             inc:0, incFrom:"", incTo:"",
+             notes:"", earmarks:[], saved:false});
+  if(FILTER && FILTER !== "Emergency") setFilter("All purposes");
+  refresh();
+  const last = $("tbody").lastElementChild;
+  if(last){
+    const val = last.querySelector('[data-k="val"]');
+    if(val) val.focus(); else last.querySelector("input").focus();
+  }
+};
+const addIncomeFund = () => {
+  SEARCH = ""; if($("search")) $("search").value = "";
+  ROWS.push({id:"temp_"+Date.now(), name:"", cat:"Income fund", tag:"Investment", val:0, sip:0,
+             freq:"Yearly", exp:"", ret:4.4, start:"", mat:"", mval:0,
+             inc:0, incFrom:"", incTo:"",
+             notes:"", earmarks:[], saved:false});
+  if(FILTER && FILTER !== "Investment") setFilter("All purposes");
+  refresh();
+  const last = $("tbody").lastElementChild;
+  if(last) last.querySelector("input").focus();
+};
 $("btn-add").addEventListener("click", () => addAsset("Investment"));
 $("btn-add2").addEventListener("click", () => addAsset("Investment"));
 $("btn-add-personal").addEventListener("click", () => addAsset("Personal"));
 $("btn-add-personal2").addEventListener("click", () => addAsset("Personal"));
+$("btn-add-income").addEventListener("click", addIncomeFund);
+$("btn-add-income2").addEventListener("click", addIncomeFund);
+$("btn-add-cash").addEventListener("click", addCash);
+$("btn-add-cash2").addEventListener("click", addCash);
 $("search").addEventListener("input", e => { SEARCH = e.target.value; drawTable(); });
 const FILTEROPTS = [{n:"All purposes"}].concat(TAGS.map(t => ({n:t.n, c:t.c})));
 const setFilter = v => {
@@ -1180,10 +1470,10 @@ $("btn-reset").addEventListener("click", () => {
   SEARCH = ""; $("search").value = ""; setFilter("All purposes");
 });
 $("btn-csv").addEventListener("click", () => {
-  const head = ["Name","Category","Purpose","Current value","Expected return %","SIP amount","SIP frequency","SIP expiry","Maturity date","Maturity value","Value in 10 yrs","Earmarked to","Notes"];
+  const head = ["Name","Category","Purpose","Start date","Current value","Expected return %","SIP amount","SIP frequency","SIP expiry","Income payout","Income from","Income to","Maturity date","Maturity value","Value in 10 yrs","Earmarked to","Notes"];
   const q = v => `"${String(v??"").replace(/"/g,'""')}"`;
   const csv = [head.map(q).join(",")].concat(
-    ROWS.map(r => [r.name,r.cat,r.tag,r.val,r.ret,r.sip,r.freq,r.exp,r.mat||"",num(r.mval)>0?r.mval:"",Math.round(futureValue(r,10)),(r.earmarks||[]).map(e => e.name+" "+e.pct+"%").join("; "),r.notes].map(q).join(","))
+    ROWS.map(r => [r.name,r.cat,r.tag,r.start||"",r.val,r.ret,r.sip,r.freq,r.exp,num(r.inc)>0?r.inc:"",r.incFrom||"",r.incTo||"",r.mat||"",num(r.mval)>0?r.mval:"",Math.round(futureValue(r,10)),(r.earmarks||[]).map(e => e.name+" "+e.pct+"%").join("; "),r.notes].map(q).join(","))
   ).join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
@@ -1338,6 +1628,8 @@ function keyHead(h){
 function matchCatName(v){
   const s = String(v || "").trim();
   if (!s) return "Other";
+  if (isCashName(s)) return "Cash";
+  if (/income\s*fund/i.test(s)) return "Income fund";
   const exact = CATS.find(c => c.n.toLowerCase() === s.toLowerCase());
   if (exact) return exact.n;
   const part = CATS.find(c => s.toLowerCase().includes(c.n.toLowerCase()) || c.n.toLowerCase().includes(s.toLowerCase()));
@@ -1368,12 +1660,16 @@ function rowsFromTable(table){
   const iName = idx(["name", "asset", "holding"]);
   const iCat = idx(["category", "asset class", "class"]);
   const iTag = idx(["purpose", "tag"]);
+  const iStart = idx(["start date", "starts on", "purchase date"]);
+  const iInc = idx(["income payout", "income amount", "annual income", "distribution"]);
+  const iIncFrom = idx(["income from", "income start"]);
+  const iIncTo = idx(["income to", "income end"]);
   const iMat = idx(["maturity date", "matures on", "matures", "maturity"]);
-  const iMval = idx(["maturity value", "maturity amount", "payout", "sum assured"]);
-  const iSip = idx(["sip amount", "sip"]);
+  const iMval = idx(["maturity value", "maturity amount", "sum assured"]);
+  const iSip = idx(["sip amount", "sip", "premium"]);
   const iFreq = idx(["sip frequency", "frequency"]);
   const iExp = idx(["sip expiry", "expiry"]);
-  const iRet = idx(["expected return", "return", "growth"]);
+  const iRet = idx(["expected return", "xirr", "irr", "return", "growth"]);
   const iVal = idx(["current value", "market value", "value", "amount"]);
   const iNotes = idx(["notes", "note", "remark"]);
   const out = [];
@@ -1395,13 +1691,18 @@ function rowsFromTable(table){
       freq,
       exp: parseDateCell(iExp >= 0 ? cells[iExp] : ""),
       ret: parsePctCell(iRet >= 0 ? cells[iRet] : catOf(cat).ret),
+      start: parseDateCell(iStart >= 0 ? cells[iStart] : ""),
       mat: parseDateCell(iMat >= 0 ? cells[iMat] : ""),
       mval: parseMoneyCell(iMval >= 0 ? cells[iMval] : ""),
+      inc: parseMoneyCell(iInc >= 0 ? cells[iInc] : ""),
+      incFrom: parseDateCell(iIncFrom >= 0 ? cells[iIncFrom] : ""),
+      incTo: parseDateCell(iIncTo >= 0 ? cells[iIncTo] : ""),
       notes: iNotes >= 0 ? String(cells[iNotes] || "").trim() : "",
       earmarks: tag === "Personal" ? [] : [],
       saved: false
     };
-    syncImpliedReturn(row);
+    if (isCash(row)) { row.cat = "Cash"; row.ret = 0; row.mat = ""; row.mval = 0; row.inc = 0; row.incFrom = ""; row.incTo = ""; row.start = ""; }
+    else syncImpliedReturn(row);
     out.push(row);
   });
   return out;
@@ -1425,7 +1726,7 @@ async function importAssetFile(file){
   }
   const incoming = rowsFromTable(table);
   if (!incoming.length) {
-    alert("No asset rows found. Use columns like Name, Category, Purpose, Current value, Expected return %. Maturity date and Maturity value are optional.");
+    alert("No asset rows found. Use columns like Name, Category, Purpose, Current value, Expected return %. Income payout / dates and Maturity date / value are optional.");
     return;
   }
   incoming.forEach(r => ROWS.push(r));

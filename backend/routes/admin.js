@@ -663,7 +663,7 @@ router.put('/admin/users/:userId', authenticateAdmin, [
   body('password').optional({ values: 'falsy' }).isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
 ], async (req, res) => {
   try {
-    if (req.admin.role !== 'admin') {
+    if (req.admin.role !== 'admin' && req.admin.role !== 'super_admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
 
@@ -681,7 +681,7 @@ router.put('/admin/users/:userId', authenticateAdmin, [
     if (userCheck.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    if (userCheck.rows[0].admin_id !== req.admin.id) {
+    if (req.admin.role === 'admin' && userCheck.rows[0].admin_id !== req.admin.id) {
       return res.status(403).json({ error: 'Access denied. User is not assigned to you' });
     }
 
@@ -768,7 +768,7 @@ router.get('/admin/users/:userId/profile', authenticateAdmin, async (req, res) =
 
     // Verify user is assigned to this admin
     const userCheck = await pool.query(
-      'SELECT id, admin_id FROM "user" WHERE id = $1',
+      'SELECT id, email, name, admin_id, created_at, updated_at FROM "user" WHERE id = $1',
       [userId]
     );
 
@@ -776,9 +776,11 @@ router.get('/admin/users/:userId/profile', authenticateAdmin, async (req, res) =
       return res.status(404).json({ error: 'User not found' });
     }
 
-    if (userCheck.rows[0].admin_id !== req.admin.id) {
+    if (req.admin.role === 'admin' && userCheck.rows[0].admin_id !== req.admin.id) {
       return res.status(403).json({ error: 'Access denied. User is not assigned to you' });
     }
+
+    const { admin_id, ...client } = userCheck.rows[0];
 
     // Get financial profile
     const profileResult = await pool.query(
@@ -786,7 +788,7 @@ router.get('/admin/users/:userId/profile', authenticateAdmin, async (req, res) =
       [userId]
     );
 
-    res.json({ profile: profileResult.rows[0] || null });
+    res.json({ user: client, profile: profileResult.rows[0] || null });
   } catch (error) {
     console.error('Error fetching user profile:', error);
     res.status(500).json({ error: 'Internal server error' });
