@@ -1450,6 +1450,8 @@ router.delete('/loans/:loanId', async (req, res) => {
     }
 
     console.log('✅ Proceeding with deletion of loan ID:', loanId);
+    const expenseDeleteResult = await pool.query('DELETE FROM financial_expense WHERE loan_id = $1', [loanId]);
+    console.log(`✅ Deleted ${expenseDeleteResult.rowCount} expense(s) for loan ${loanId}`);
     const result = await pool.query('DELETE FROM financial_loan WHERE id = $1 RETURNING id', [loanId]);
     console.log('✅ Loan deleted successfully:', result.rows[0]);
 

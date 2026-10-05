@@ -846,7 +846,12 @@ function incomeItemsNow(){
 }
 function current(){
   const salary  = incomeAt(0, (S.gSal||0)/100);
-  const expenses= livingAt(0, 0);
+  const ageAt = num(S.age);
+  const expenses= livingSource().reduce((s,e) => {
+    const to = expTo(e);
+    if(ageAt > to) return s;
+    return s + num(e.v);
+  }, 0);
   const emiYear = sum(S.loans,"emi")*12;
   const surplus = salary - expenses - emiYear;
   const finAssets = num(S.finAssets);
@@ -1583,9 +1588,15 @@ function refresh(){
 
   /* --- chart 1: what comes in against what goes out, surplus in the middle --- */
   const spend = [];
-  livingSource().forEach((e,i) => { if(num(e.v) > 0) spend.push({
-    n:e.n || "Expense "+(i+1), v:num(e.v), c:pick(PAL_LIVE,i),
-    d:"A yearly living cost. Inflates at "+S.gInf+"% a year." }); });
+  const ageNow = num(S.age);
+  livingSource().forEach((e,i) => {
+    if(num(e.v) <= 0) return;
+    if(ageNow > expTo(e)) return;
+    spend.push({
+      n:e.n || "Expense "+(i+1), v:num(e.v), c:pick(PAL_LIVE,i),
+      d:"A yearly living cost. Inflates at "+S.gInf+"% a year."
+        + (num(e.from) > ageNow ? " Starts at age "+num(e.from)+" on the freedom chart." : "") });
+  });
   S.loans.forEach((l,i) => { const a = num(l.emi)*12; if(a > 0) spend.push({
     n:(l.n || "Loan "+(i+1))+" EMI", v:a, c:pick(PAL_DEBT,i),
     d: full(num(l.emi))+" a month. Stops once the balance is repaid." }); });

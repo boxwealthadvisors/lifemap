@@ -11,15 +11,12 @@ import {
   isIncomeFundCategory,
   plannedCashDraws,
   plannedGrowRows,
-  combinedWorkUnassigned,
   floorLump,
   fpEditableExpenses,
   fpLivingExpenses,
   unassignedOf,
-  FREQ_PER_YEAR,
   num,
   parseHousehold,
-  workAnnual,
 } from './planLinks'
 
 const PAGES = {
@@ -240,12 +237,20 @@ function rowHasContent(row) {
     .some((value) => num(value) > 0)
 }
 
-function isLinkedExpense(row) {
-  return Boolean(row?.loan_id || row?.insurance_id || row?.loanId || row?.insId)
+function isLiveLinkedExpense(row, loanIds) {
+  if (row?.insurance_id || row?.insId) return true
+  const loanId = row?.loan_id || row?.loanId
+  if (!loanId) return false
+  if (loanIds && !loanIds.has(String(loanId))) return false
+  return true
 }
 
-function toExpenseRow(e, age, life) {
+function toExpenseRow(e, age, life, loanIds) {
   const freq = e.frequency === 'Semi-Annually' ? 'Half-yearly' : (e.frequency === 'Yearly' ? 'Annually' : (e.frequency || 'Monthly'))
+  const fromRaw = e.start_age ?? e.from
+  const fromN = fromRaw == null || fromRaw === '' ? 0 : num(fromRaw)
+  const loanId = e.loan_id || e.loanId || null
+  const orphanLoan = Boolean(loanId && loanIds && !loanIds.has(String(loanId)))
   return {
     id: e.id,
     cat: e.category || 'Other',
@@ -254,11 +259,11 @@ function toExpenseRow(e, age, life) {
     amt: num(e.amount ?? e.amt),
     freq: e.freq || freq,
     inf: asPct(e.personal_inflation ?? e.inf, 6),
-    from: num(e.start_age ?? e.from, age || 32),
+    from: fromN > 0 ? fromN : (age || 32),
     to: num(e.end_age ?? e.to, life || 90),
     src: e.payment_from || e.src || '',
     notes: e.notes || '',
-    loanId: e.loan_id || e.loanId || null,
+    loanId: orphanLoan ? null : loanId,
     insId: e.insurance_id || e.insId || null,
     saved: true,
   }
@@ -423,7 +428,38 @@ export async function loadMockupState(page, userId, options = {}) {
       '#2f6fd0', '#0d8a78', '#e9a23b', '#c94f70', '#7b61c9',
       '#2a9dce', '#d65a31', '#5a9e3d', '#b35c9c', '#8c6d31',
     ]
-    const ROWS = list.map((r, i) => ({
+    const gSal = asPct(assumptions.incomeGrowthRate, 8)
+    const workTill = age + Math.max(1, num(profile?.work_tenure_years, 28))
+    const household = parseHousehold(profile?.household)
+    const locked = [{
+      id: 'lock-salary',
+      locked: true,
+      kind: 'salary',
+      c: '#003c8f',
+      name: 'Salary (take-home)',
+      amt: num(profile?.current_annual_gross_income),
+      g: gSal,
+      end: workTill,
+      notes: 'Linked to FP Calculator',
+      saved: true,
+    }]
+    household.forEach((m, i) => {
+      locked.push({
+        id: `lock-hh-${m.id || i}`,
+        locked: true,
+        kind: 'household',
+        hhIndex: i,
+        hhId: m.id || `hh-${i}`,
+        c: colors[(i + 1) % colors.length],
+        name: `${m.n || 'Family member'} · ${m.rel || 'family'}`,
+        amt: num(m.income),
+        g: asPct(m.g ?? m.growth, gSal),
+        end: num(m.workTill ?? m.work_till, workTill),
+        notes: 'Linked to Family members on FP Calculator',
+        saved: true,
+      })
+    })
+    const ROWS = locked.concat(list.map((r, i) => ({
       id: r.id,
       c: r.color || colors[i % colors.length],
       name: r.stream || r.name || '',
@@ -432,11 +468,11 @@ export async function loadMockupState(page, userId, options = {}) {
       end: num(r.endAge, 65),
       notes: r.notes || '',
       saved: true,
-    }))
+    })))
     return {
       ROWS,
       AGE: age,
-      UNASSIGNED: combinedWorkUnassigned(profile, list),
+      UNASSIGNED: 0,
     }
   }
 
@@ -539,12 +575,14 @@ export async function loadMockupState(page, userId, options = {}) {
   }
 
   if (page === 'expenses') {
-    const [res, assetsRes] = await Promise.all([
+    const [res, assetsRes, loansRes] = await Promise.all([
       api.getFinancialExpenses().catch(() => ({})),
       api.getFinancialAssets().catch(() => ({})),
+      api.getFinancialLoans().catch(() => ({})),
     ])
     const life = assumptions.lifespanYears || 90
-    const ROWS = asList(res, 'expenses').map((e) => toExpenseRow(e, age, life))
+    const loanIds = new Set(asList(loansRes, 'loans').map((l) => String(l.id)))
+    const ROWS = asList(res, 'expenses').map((e) => toExpenseRow(e, age, life, loanIds))
     const SOURCES = asList(assetsRes, 'assets')
       .map((a) => a.name)
       .filter(Boolean)
@@ -791,9 +829,10 @@ export async function saveMockupState(page, userId, state, options = {}) {
     const agePatch = state.AGE ? { age: num(state.AGE) } : {}
     await ensureProfile(api, agePatch)
     const res = await api.getWorkAssets().catch(() => [])
+    const openRows = (state.ROWS || []).filter((r) => !r.locked)
     await syncCollection({
       existing: asList(res, 'workAssets', 'assets', 'data'),
-      next: (state.ROWS || []).map((row) => ({ ...row, name: row.name })),
+      next: openRows,
       create: (body) => api.createWorkAsset(body),
       update: (id, body) => api.updateWorkAsset(id, body),
       remove: (id) => api.deleteWorkAsset(id),
@@ -806,19 +845,39 @@ export async function saveMockupState(page, userId, state, options = {}) {
         color: row.c || null,
       }),
     })
-    if (state.AGE || workAnnual(state.ROWS)) {
-      const profileRes = await api.getFinancialProfile().catch(() => null)
-      const current = profileRes?.profile
-      const patch = {}
-      if (state.AGE) patch.age = num(state.AGE)
-      if (Object.keys(patch).length) {
-        await upsertProfile(api, patch).catch(() => {})
-      }
-      const salary = num(current?.current_annual_gross_income)
-      const streams = workAnnual(state.ROWS)
-      const tenure = Math.max(1, num(current?.work_tenure_years, 28))
-      state.UNASSIGNED = unassignedOf(salary, streams) * tenure
+    const salaryRow = (state.ROWS || []).find((r) => r.kind === 'salary')
+    const hhRows = (state.ROWS || []).filter((r) => r.kind === 'household')
+    const profileRes = await api.getFinancialProfile().catch(() => null)
+    const current = profileRes?.profile
+    const patch = { ...agePatch }
+    if (salaryRow) {
+      patch.current_annual_gross_income = num(salaryRow.amt)
+      patch.income_growth_rate = asRate(salaryRow.g, 0.08)
+      const ageNow = num(state.AGE || current?.age, 32)
+      patch.work_tenure_years = Math.max(1, num(salaryRow.end, ageNow + 28) - ageNow)
     }
+    if (hhRows.length) {
+      const currentHh = parseHousehold(current?.household)
+      const base = currentHh.length ? currentHh : hhRows.map(() => ({}))
+      patch.household = base.map((m, i) => {
+        const row = hhRows.find((r) => Number(r.hhIndex) === i) || hhRows[i]
+        if (!row) return m
+        return {
+          ...m,
+          id: m.id || row.hhId || `hh-${i}`,
+          n: m.n || String(row.name || '').split(' · ')[0],
+          rel: m.rel || m.relation || 'Spouse',
+          age: num(m.age, num(state.AGE)),
+          income: num(row.amt),
+          g: num(row.g, m.g),
+          workTill: num(row.end, m.workTill),
+        }
+      })
+    }
+    if (Object.keys(patch).length) {
+      await upsertProfile(api, patch).catch(() => {})
+    }
+    state.UNASSIGNED = 0
     return
   }
 
@@ -912,15 +971,19 @@ export async function saveMockupState(page, userId, state, options = {}) {
 
   if (page === 'expenses') {
     if (!Array.isArray(state.ROWS)) return
-    const res = await api.getFinancialExpenses().catch(() => ({}))
+    const [res, loansRes] = await Promise.all([
+      api.getFinancialExpenses().catch(() => ({})),
+      api.getFinancialLoans().catch(() => ({})),
+    ])
     const existing = asList(res, 'expenses')
+    const loanIds = new Set(asList(loansRes, 'loans').map((l) => String(l.id)))
     const age = num(state.AGE, 32)
     const lifespanYears = num(state.LIFE, 90)
     const next = [...(state.ROWS || [])]
     const nextIds = new Set(next.filter((row) => realId(row.id)).map((row) => String(row.id)))
     existing.forEach((row) => {
-      if (isLinkedExpense(row) && !nextIds.has(String(row.id))) {
-        next.push(toExpenseRow(row, age, lifespanYears))
+      if (isLiveLinkedExpense(row, loanIds) && !nextIds.has(String(row.id))) {
+        next.push(toExpenseRow(row, age, lifespanYears, loanIds))
       }
     })
     state.ROWS = next
@@ -930,9 +993,9 @@ export async function saveMockupState(page, userId, state, options = {}) {
       create: (body) => api.createFinancialExpense(body),
       update: (id, body) => api.updateFinancialExpense(id, body),
       remove: (id) => api.deleteFinancialExpense(id),
-      protect: isLinkedExpense,
+      protect: (row) => isLiveLinkedExpense(row, loanIds),
       payload: (row, prior) => {
-        if (isLinkedExpense(prior || row)) {
+        if (isLiveLinkedExpense(prior || row, loanIds)) {
           return {
             notes: row.notes || '',
             payment_from: row.src || '',

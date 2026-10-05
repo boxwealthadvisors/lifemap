@@ -191,6 +191,9 @@ td.stick{background:#fff; box-shadow:6px 0 10px -8px rgba(10,31,68,.28), 1px 0 0
 th.stick{background:var(--paper); z-index:5; box-shadow:6px 0 10px -8px rgba(10,31,68,.28), 1px 0 0 var(--line)}
 tr:hover td{background:#fbfcfe}
 tr:hover td.stick{background:#fbfcfe}
+tr.linked td{background:#f5f9fc}
+tr.linked:hover td{background:#eef5fb}
+tr.linked td.stick{background:#f5f9fc}
 td.rt{text-align:right}
 .cell{width:100%; border:1px solid transparent; border-radius:8px; padding:8px 9px; font-size:14px;
   background:transparent; color:var(--ink); transition:border-color .13s, background .13s}
@@ -202,6 +205,7 @@ td.rt{text-align:right}
 .assetname .cell.name{min-width:0; flex:1}
 .cell.money{text-align:right; font-variant-numeric:tabular-nums; min-width:118px}
 .cell.small{min-width:96px}
+.cell[readonly].linked{background:var(--paper); color:var(--muted); cursor:default}
 
 .swatch{display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:7px; vertical-align:1px}
 .proj{font-weight:700; color:var(--green); font-variant-numeric:tabular-nums; white-space:nowrap}
@@ -310,7 +314,7 @@ td.rt{text-align:right}
     <h1>What you earn
       <button class="pmore" type="button" aria-expanded="false" aria-controls="phead-desc" aria-label="Show what this page is for"></button></h1>
     <div class="pdesc" id="phead-desc"><p>Your income streams beyond regular salary can be valuable work assets &mdash; each one is worth what it will still pay you before it stops.
-       Set what each pays this year, how fast it grows and the age it ends, and the mix and the curve below rebuild themselves. Salary and annual bonuses belong in active employment income, not in this register.</p></div>
+       Set what each pays this year, how fast it grows and the age it ends, and the mix and the curve below rebuild themselves. Take-home salary and family-member income are fixed linked rows from the FP Calculator &mdash; edit them here or there, not twice.</p></div>
     <div class="assume">
       <label class="agebox" for="i-age">Your age today <input id="i-age" type="number" min="16" max="90" step="1" value="32"></label>
       <span class="ahint">Every stream runs from this age until the end age you give it. Change it and the whole page recalculates.</span>
@@ -725,16 +729,20 @@ function drawTable(){
 
   rows.forEach(({r,i}, vi) => {
     const tr = document.createElement("tr");
+    const locked = Boolean(r.locked);
+    if(locked) tr.classList.add("linked");
     const val = valueOf(r), yrs = yearsLeft(r);
     tr.innerHTML = `
-      <td class="stick"><div class="assetname"><span class="assetdot" title="Chart colour" style="background:${assetColour(r,i)}"></span><input class="cell name" data-k="name" value="${esc(r.name)}" placeholder="Name this stream"></div></td>
+      <td class="stick"><div class="assetname"><span class="assetdot" title="Chart colour" style="background:${assetColour(r,i)}"></span><input class="cell name${locked?" linked":""}" data-k="name" value="${esc(r.name)}" placeholder="Name this stream"${locked?" readonly":""}></div></td>
       <td><input class="cell money" data-k="amt" type="text" inputmode="decimal" value="${r.amt}" placeholder="0"></td>
       <td><input class="cell money" data-k="g" type="text" inputmode="decimal" value="${pctStr(r.g)}"></td>
       <td><input class="cell money" data-k="end" type="text" inputmode="numeric" value="${r.end}"></td>
       <td class="rt"><span class="proj${yrs?"":" done"}">${fmt(val)}<small>${yrs ? yrs + (yrs===1?" more year":" more years") : "already ended"}</small></span></td>
-      <td><input class="cell" data-k="notes" value="${esc(r.notes||"")}" placeholder="Click to add" style="min-width:150px"></td>
+      <td><input class="cell${locked?" linked":""}" data-k="notes" value="${esc(r.notes||"")}" placeholder="Click to add" style="min-width:150px"${locked?" readonly":""}></td>
       <td><span class="acts">
-        <button class="rb del" type="button">Remove</button></span></td>`;
+        ${locked
+          ? `<button class="rb del" type="button" disabled title="Linked to FP Calculator">Linked</button>`
+          : `<button class="rb del" type="button">Remove</button>`}</span></td>`;
 
     const projected = tr.querySelector(".proj");
     const dirty = () => { r.saved = false; };
@@ -759,7 +767,10 @@ function drawTable(){
     });
 
 
-    tr.querySelector(".del").addEventListener("click", () => { ROWS.splice(i,1); refresh(); });
+    tr.querySelector(".del").addEventListener("click", () => {
+      if(r.locked) return;
+      ROWS.splice(i,1); refresh();
+    });
     tb.appendChild(tr);
   });
 }

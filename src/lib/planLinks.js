@@ -8,12 +8,24 @@ export const FREQ_PER_YEAR = {
   'Semi-Annually': 2,
   'Half-yearly': 2,
   Annually: 1,
+  Annual: 1,
   Yearly: 1,
+  Year: 1,
+  'One-time': 1,
+  'One time': 1,
 }
 
 export function num(v, fallback = 0) {
   const n = parseFloat(v)
   return Number.isFinite(n) ? n : fallback
+}
+
+export function annualAmount(expense) {
+  const amount = num(expense?.amount ?? expense?.amt)
+  const freqRaw = String(expense?.frequency || expense?.freq || 'Monthly').trim()
+  const freq = Object.keys(FREQ_PER_YEAR).find((k) => k.toLowerCase() === freqRaw.toLowerCase()) || freqRaw
+  const per = FREQ_PER_YEAR[freq]
+  return amount * (Number.isFinite(per) ? per : 12)
 }
 
 export function asList(data, ...keys) {
@@ -23,12 +35,6 @@ export function asList(data, ...keys) {
     if (Array.isArray(data[key])) return data[key]
   }
   return []
-}
-
-export function annualAmount(expense) {
-  const amount = num(expense?.amount ?? expense?.amt)
-  const freq = expense?.frequency || expense?.freq || 'Monthly'
-  return amount * (FREQ_PER_YEAR[freq] || 12)
 }
 
 export function livingExpensesPresentValue(list, age, lifespan, inflation) {

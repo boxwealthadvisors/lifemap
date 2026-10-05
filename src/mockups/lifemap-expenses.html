@@ -183,6 +183,7 @@ td.stick{background:#fff; box-shadow:6px 0 10px -8px rgba(10,31,68,.28), 1px 0 0
 th.stick{background:var(--paper); z-index:5; box-shadow:6px 0 10px -8px rgba(10,31,68,.28), 1px 0 0 var(--line)}
 tr:hover td{background:#fbfcfe}
 tr:hover td.stick{background:#fbfcfe}
+tr.starts-later td{background:#fbf8f1}
 td.rt{text-align:right}
 .cell{width:100%; border:1px solid transparent; border-radius:8px; padding:8px 9px; font-size:14px;
   background:transparent; color:var(--ink); transition:border-color .13s, background .13s}
@@ -426,7 +427,7 @@ td.rt{text-align:right}
       </div>
     </div>
     <div class="mixsub" id="mix-sub">&nbsp;</div>
-    <div class="mixsub" style="margin-top:-8px; color:var(--slate)">Only what is running at your current age. Expenses that start later appear once you reach them.</div>
+    <div class="mixsub" style="margin-top:-8px; color:var(--slate)">Every expense that has not yet ended, at this year&rsquo;s price. From age still controls when a cost appears on the curve below.</div>
     <div class="mixbody">
       <div>
         <div class="donutbox">
@@ -578,7 +579,7 @@ const TAGS = [
   {n:"Saving", c:"#0d8a78", target:20, d:"Money leaving your account to work for you later. It shows here as an outgo, but it is the one that builds the plan."}
 ];
 const FREQ = ["Monthly","Quarterly","Half-yearly","Annually"];
-const PER_YEAR = {Monthly:12, Quarterly:4, "Half-yearly":2, Annually:1};
+const PER_YEAR = {Monthly:12, Quarterly:4, "Half-yearly":2, Annually:1, Yearly:1, Annual:1, Year:1};
 
 const catOf = n => CATS.find(c => c.n === n) || CATS[CATS.length-1];
 const tagOf = n => TAGS.find(t => t.n === n) || TAGS[0];
@@ -686,13 +687,26 @@ const full = n => (n<0?"\u2212":"")+"\u20B9"+Math.abs(Math.round(n)).toLocaleStr
    Inflation always runs from today, not from the start age, because the amount
    entered is a present-day price.
 --------------------------------------------------------- */
-const annual = r => num(r.amt) * (PER_YEAR[r.freq] || 0);
-const startOf = r => Math.max(AGE, num(r.from) || AGE);
+const annual = r => {
+  const key = Object.keys(PER_YEAR).find(k => k.toLowerCase() === String(r.freq || "").toLowerCase());
+  return num(r.amt) * (key ? PER_YEAR[key] : (PER_YEAR[r.freq] || 0));
+};
+const rawFrom = r => {
+  if(r.from === "" || r.from == null) return AGE;
+  const n = num(r.from);
+  return n > 0 ? n : AGE;
+};
+const startOf = r => rawFrom(r);
 const endOf   = r => Math.min(LIFE, (r.to === "" || r.to == null) ? LIFE : num(r.to));
-const runs    = r => endOf(r) >= startOf(r);
-const yearsOf = r => runs(r) ? (endOf(r) - startOf(r) + 1) : 0;
-const activeAt = (r, t) => { const a = AGE + t; return runs(r) && a >= startOf(r) && a <= endOf(r); };
+const runs    = r => endOf(r) >= Math.max(AGE, startOf(r));
+const yearsOf = r => {
+  const a0 = Math.max(AGE, startOf(r)), a1 = endOf(r);
+  return a1 >= a0 ? (a1 - a0 + 1) : 0;
+};
+const activeAt = (r, t) => { const a = AGE + t; return a >= startOf(r) && a <= endOf(r); };
 const costAt   = (r, t) => activeAt(r, t) ? annual(r) * Math.pow(1 + num(r.inf)/100, t) : 0;
+const startsLater = r => startOf(r) > AGE;
+const thisYearCost = r => endOf(r) >= AGE ? annual(r) : 0;
 /* What gets displayed. Nominal figures 58 years out are dominated by compounding,
    which hides the thing this page is about: expenses starting and stopping. In
    today's money the steps stay legible, and a rate above general inflation still
@@ -705,7 +719,7 @@ const basisNote = () => BASIS === "real" ? "in today's money" : "in future rupee
 const runTotal = r => { let s = 0; for(let t=0; t<=SPAN(); t++) s += showAt(r, t); return s; };
 const SPAN = () => Math.max(1, Math.round(LIFE - AGE));
 const totalAt = t => ROWS.reduce((s,r) => s + costAt(r, t), 0);
-const totalAnnual = () => totalAt(0);
+const totalAnnual = () => ROWS.reduce((s,r) => s + thisYearCost(r), 0);
 const later = (r, years) => costAt(r, years);
 /* a rate typed as 0.06 almost always means 6 */
 const suspectRate = r => num(r.inf) > 0 && num(r.inf) < 0.5;
@@ -731,7 +745,7 @@ function buckets(by){
   ROWS.forEach(r => {
     const key = by === "cat" ? catOf(r.cat).n : tagOf(r.type).n;
     const b = out.find(o => o.n === key);
-    if(b) b.v += costAt(r, 0);          /* the mix is what you spend now */
+    if(b) b.v += thisYearCost(r);          /* mix is the register at today's prices */
   });
   return out.filter(o => o.v > 0).sort((a,b) => b.v - a.v);
 }
@@ -810,9 +824,13 @@ function drawDonut(){
   const top = outer[0];
   $("d-v").textContent = fmt(total);
   $("d-s").textContent = top ? `${(top.v/total*100).toFixed(0)}% goes on ${top.n.toLowerCase()}` : "";
+  const later = ROWS.filter(startsLater);
   $("mix-sub").textContent = MODE === "cat"
     ? `${fmt(total/12)} a month across ${outer.length} ${outer.length===1?"category":"categories"}`
     : `${fmt(total/12)} a month across ${outer.length} ${outer.length===1?"type":"types"}`;
+  if(later.length){
+    $("mix-sub").textContent += ` · ${later.length} start after ${AGE} and still show here`;
+  }
   $("d-key").innerHTML = MODE === "cat"
     ? "Outer ring: what it is &nbsp;&middot;&nbsp; Inner arc: need, want or saving"
     : "Outer ring: need, want or saving &nbsp;&middot;&nbsp; Inner arc: what it is";
@@ -1178,10 +1196,13 @@ function drawCards(){
   }));
   let pk = 0, pkv = 0;
   for(let t=0; t<=SPAN(); t++){ const v = showTotalAt(t); if(v > pkv){ pkv = v; pk = t; } }
+  const laterN = ROWS.filter(startsLater).length;
   $("cards").innerHTML =
       `<div class="sum total"><div class="l">Spending this year</div>
          <div class="v">${fmt(total)}</div>
-         <div class="s">${ROWS.filter(r => costAt(r,0) > 0).length} of ${ROWS.length} running at ${AGE}</div></div>`
+         <div class="s">${ROWS.filter(r => thisYearCost(r) > 0).length} of ${ROWS.length} still in the plan`
+           + (laterN ? ` · ${laterN} start later` : "")
+           + ` at ${AGE}</div></div>`
     + `<div class="sum" style="--tone:#003c8f"><div class="l">A month, on average</div>
          <div class="v" style="color:#003c8f">${fmt(total/12)}</div>
          <div class="s">annual total spread evenly</div></div>`
@@ -1216,6 +1237,7 @@ function drawTable(){
     const yr = annual(r), bad = badWindow(r), yrs = yearsOf(r), tot = runTotal(r);
     const locked = Boolean(r.loanId || r.insId);
     const tr = document.createElement("tr");
+    if(startsLater(r)) tr.classList.add("starts-later");
     tr.innerHTML = `
       <td class="stick">
         <button type="button" class="dd cell catpick" data-k="cat" aria-haspopup="listbox" aria-expanded="false"${locked?" disabled":""}>
@@ -1227,7 +1249,7 @@ function drawTable(){
       <td><button type="button" class="dd cell small" data-k="freq" aria-haspopup="listbox" aria-expanded="false"${locked?" disabled":""}>
           <span class="lbl">${esc(r.freq)}</span></button></td>
       <td class="rt"><span class="proj" data-proj="annual">${fmt(yr)}<small>${fmt(yr/12)} a month</small></span></td>
-      <td><input class="cell money small${bad?" warnval":""}" data-k="from" type="text" inputmode="numeric" value="${r.from}" style="min-width:74px"></td>
+      <td><input class="cell money small${bad?" warnval":""}" data-k="from" type="text" inputmode="numeric" value="${r.from}" style="min-width:74px"${startsLater(r) ? ` title="Starts at age ${startOf(r)}. Still counted in Spending this year."` : ""}></td>
       <td><input class="cell money small${bad?" warnval":""}" data-k="to" type="text" inputmode="numeric" value="${r.to}" style="min-width:74px"></td>
       <td><span class="flagwrap">
             <input class="cell money${suspectRate(r)?" warnval":""}" data-k="inf" type="text" inputmode="decimal" value="${r.inf}">
@@ -1384,7 +1406,13 @@ document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click"
 }));
 $("i-age").addEventListener("input", e => {
   const v = num(e.target.value);
-  if(v > 0 && v < 100){ AGE = Math.round(v); if(LIFE <= AGE){ LIFE = AGE + 1; $("i-life").value = LIFE; } refresh(); }
+  if(v > 0 && v < 100){
+    const prev = AGE;
+    AGE = Math.round(v);
+    ROWS.forEach(r => { if(num(r.from) === prev) r.from = AGE; });
+    if(LIFE <= AGE){ LIFE = AGE + 1; $("i-life").value = LIFE; }
+    refresh();
+  }
 });
 $("i-life").addEventListener("input", e => {
   const v = num(e.target.value);
