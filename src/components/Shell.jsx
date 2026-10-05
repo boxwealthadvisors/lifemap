@@ -219,9 +219,14 @@ export default function Shell({ children, adminMode = false, activeSection, onSe
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <button type="button" className="lm-tlink" onClick={() => openAuth('login')}>
-                Sign in
-              </button>
+              <>
+                <button type="button" className="lm-tlink" onClick={() => openAuth('login')}>
+                  Sign in
+                </button>
+                <button type="button" className="lm-tlink" onClick={() => openAuth('signup')}>
+                  Sign up
+                </button>
+              </>
             )}
             {adminMode && admin ? (
               <button type="button" className="lm-btn" onClick={handleLogout}>Logout</button>

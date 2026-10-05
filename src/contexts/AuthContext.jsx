@@ -145,8 +145,10 @@ export const AuthProvider = ({ children }) => {
       const response = await ApiService.register(userData);
       if (response.token) {
         localStorage.setItem('authToken', response.token);
+        localStorage.removeItem('adminToken');
       }
       setUser(response.user);
+      setAdmin(null);
       
       return response;
     } catch (error) {
@@ -154,6 +156,16 @@ export const AuthProvider = ({ children }) => {
       throw error;
     } finally {
       setLoading(false);
+    }
+  };
+
+  const requestOtp = async (email) => {
+    try {
+      setError(null);
+      return await ApiService.requestOtp({ email });
+    } catch (error) {
+      setError(error.message);
+      throw error;
     }
   };
 
@@ -248,6 +260,7 @@ export const AuthProvider = ({ children }) => {
     error,
     login,
     register,
+    requestOtp,
     logout,
     updateProfile,
     clearError,

@@ -8,7 +8,7 @@ You are **Codex** working in the LifeMap repo. Read this entire file before you 
 
 **First job:** Arun will give you unlinked client files (CSV / XLSX / dumps). Convert them to the CSV templates, run `backend/scripts/bulk-import-clients.js` against the Render **External** Postgres URL, return `passwords.csv` to Arun privately, and list anything you could not import. Exact steps are under **How you update the live database (bulk)** below.
 
-**Product:** LifeMap by BOX Wealth. A client signs in, fills FP Calculator / Assets / Work assets / Goals / Loans / Expenses / Insurance, and the plan is stored in Postgres. An advisor (admin) can open that same plan and edit it. Super admin creates advisors. Public self-signup is closed.
+**Product:** LifeMap by BOX Wealth. A client signs in, fills FP Calculator / Assets / Work assets / Goals / Loans / Expenses / Insurance, and the plan is stored in Postgres. An advisor (admin) can open that same plan and edit it. Super admin creates advisors. Anyone can create a client account with email OTP; those self-serve users have no RM (`admin_id` is NULL).
 
 ---
 
@@ -41,6 +41,7 @@ Backend env (do not wipe):
 - `NODE_ENV` = `production`
 - `PORT` = `10000`
 - `OPENAI_API_KEY` = optional, expense classify fallback
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` = email OTP for public signup (or `RESEND_API_KEY` instead)
 
 **Never set `DATABASE_INIT=true`.** That runs a wipe-and-recreate script.
 
@@ -105,7 +106,7 @@ Three roles:
 
 One Sign in box on the public app. `POST /api/login` with `{ identifier, password }` (or `{ email, password }`) checks client email, then advisor username, then super admin username, and returns `role` plus the right JWT. Old `/admin/login` and `/super-admin/login` pages redirect to that Sign in.
 
-Public self-signup is **closed**. `POST /api/register` returns 403. New clients are created by an admin (UI) or by this import (DB/API).
+Public self-signup is **open**. `POST /api/otp` `{ email }` sends a 6-digit code; `POST /api/register` `{ email, name, password, otp }` creates `"user"` with `admin_id` NULL (no RM) and a `financial_profile`. Advisors can still create clients from `/admin` (those get `admin_id`).
 
 User-facing screens (same UI for client login and admin→client edit):
 
@@ -140,7 +141,7 @@ Rules:
 
 1. A **client login** is a row in `"user"` (`email` unique, `name`, `password_hash`, `admin_id`).
 2. Almost every plan row needs `user_id` **and** `profile_id`. Create **one** `financial_profile` per user before inserting registers.
-3. `"user".admin_id` must point at the advisor in `admin`. If it is null, that client will **not** show in that advisor’s Admin → client list.
+3. `"user".admin_id` must point at the advisor in `admin` for that client to show in the advisor list. Public self-signup users have `admin_id` NULL (no RM) until a super admin assigns them.
 4. Passwords are **bcrypt** (cost **12**, `bcryptjs`). Never store plaintext in the database.
 5. Email is the only unique client key the app has. There is no CRM id, PAN, phone, or Aadhaar column.
 
@@ -156,7 +157,7 @@ Rules:
 | `email` | varchar unique | **yes** | login id; lowercase and trim |
 | `password_hash` | varchar | **yes** | bcrypt of generated password |
 | `name` | varchar | **yes** | display name |
-| `admin_id` | int FK → `admin(id)` | **yes for advisor list** | which advisor owns this client |
+| `admin_id` | int FK → `admin(id)` | no for self-signup | NULL = no RM; set to an advisor so they appear in that advisor’s list |
 | `created_at` / `updated_at` | timestamp | | |
 
 No phone, address, DOB, PAN, family members, or client-code column.
@@ -308,6 +309,7 @@ Skip importing EMI/premium lines if you already import the parent loan/policy.
 | `user_source_preferences` | which source a widget prefers |
 | `expense_categories` / `expense_tags` | optional taxonomies |
 | `financial_scenario` | old scenario snapshots; **not** the live mockup UI |
+| `email_otp` | hashed 6-digit codes for public email signup |
 
 ---
 
@@ -430,7 +432,9 @@ User JWT from `POST /api/login` `{ identifier, password }` or `{ email, password
 
 Admin JWT can still be minted from `POST /api/admin/admin/login` `{ username, password }` (kept for scripts). Prefer the unified Sign in.
 
-Create user (admin): `POST /api/admin/users` `{ email, password, name }` — sets `admin_id` from the token. Public `POST /api/register` is forbidden.
+Create user (admin): `POST /api/admin/users` `{ email, password, name }` — sets `admin_id` from the token.
+
+Public signup: `POST /api/otp` `{ email }`, then `POST /api/register` `{ email, name, password, otp }`. Self-serve users have `admin_id` NULL.
 
 Then plan data: either SQL, or `/api/admin/financial/...` with `?userId=<id>` and the admin token (see `src/services/api.js` `*ForUser` methods).
 

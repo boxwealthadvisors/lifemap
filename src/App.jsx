@@ -12,6 +12,7 @@ import SuperAdminPage from './pages/SuperAdminPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { Toaster } from './components/ui/sonner.jsx'
+import AuthModal from './components/AuthModal.jsx'
 import './App.css'
 
 function App() {
@@ -62,6 +63,7 @@ function App() {
                 <Route path="/admin/login" element={<Navigate to="/?signin=1" replace />} />
                 <Route path="/admin" element={<AdminPage />} />
               </Routes>
+              <AuthModal />
               <Toaster />
             </div>
           </Router>

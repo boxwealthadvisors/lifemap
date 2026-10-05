@@ -136,6 +136,17 @@ const STATEMENTS = [
     $$`,
   `CREATE INDEX IF NOT EXISTS idx_user_admin_id ON public."user"(admin_id)`,
   `CREATE INDEX IF NOT EXISTS idx_admin_username ON admin(username)`,
+  `CREATE TABLE IF NOT EXISTS email_otp (
+      id SERIAL PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      code_hash VARCHAR(255) NOT NULL,
+      purpose VARCHAR(40) NOT NULL DEFAULT 'signup',
+      expires_at TIMESTAMP NOT NULL,
+      attempts INTEGER DEFAULT 0,
+      consumed_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`,
+  `CREATE INDEX IF NOT EXISTS idx_email_otp_email ON email_otp(email)`,
 ]
 
 export async function ensureLifemapMockupSchema(pool) {

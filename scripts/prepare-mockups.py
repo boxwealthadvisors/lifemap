@@ -263,6 +263,8 @@ __MARKER_START__
     if (!acts || !link) return;
     var wrap = link.closest(".lm-acct");
     if (label) {
+      var extra = acts.querySelector(".tlink.lm-signup");
+      if (extra) extra.remove();
       if (!wrap) {
         wrap = document.createElement("span");
         wrap.className = "lm-acct";
@@ -297,7 +299,22 @@ __MARKER_START__
         wrap.remove();
       }
       link.textContent = "Sign in";
-      link.setAttribute("href", "#register");
+      link.setAttribute("href", "#signin");
+      var signup = acts.querySelector(".tlink.lm-signup");
+      if (!signup) {
+        Array.prototype.forEach.call(acts.querySelectorAll(".tlink"), function(el){
+          if (!signup && /sign up/i.test((el.textContent || "").trim())) signup = el;
+        });
+      }
+      if (!signup) {
+        signup = document.createElement("a");
+        signup.className = "tlink lm-signup";
+        if (link.nextSibling) acts.insertBefore(signup, link.nextSibling);
+        else acts.appendChild(signup);
+      }
+      signup.classList.add("lm-signup");
+      signup.textContent = "Sign up";
+      signup.setAttribute("href", "#signup");
     }
   }
 
@@ -334,6 +351,7 @@ __MARKER_START__
       e.preventDefault();
       var text = (a.textContent || "").replace(/\s+/g," ").trim();
       if (/save/i.test(text) && !a.closest(".wallcta")) post("save", getState());
+      else if (/sign up/i.test(text)) post("auth", { action: "signup", label: text });
       else post("auth", { action: "signin", label: text });
     });
   });

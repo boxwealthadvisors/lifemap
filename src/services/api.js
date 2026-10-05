@@ -29,7 +29,7 @@ class ApiService {
     const userToken = localStorage.getItem('authToken');
     // For admin endpoints, prioritize admin token; for regular endpoints, use user token
     const isAdminEndpoint = endpoint.includes('/admin/');
-    const isAuthEndpoint = /\/login$|\/register$/.test(endpoint);
+    const isAuthEndpoint = /\/login$|\/register$|\/otp$/.test(endpoint);
     const token = isAdminEndpoint ? (adminToken || userToken) : (userToken || adminToken);
     
     const controller = new AbortController();
@@ -42,7 +42,7 @@ class ApiService {
     };
     
     // Set Authorization header if token exists
-    if (token) {
+    if (token && !isAuthEndpoint) {
       headers['Authorization'] = `Bearer ${token}`;
     }
     
@@ -110,6 +110,13 @@ class ApiService {
   }
 
   // Authentication APIs
+  async requestOtp(payload) {
+    return this.request('/otp', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
   async register(userData) {
     return this.request('/register', {
       method: 'POST',

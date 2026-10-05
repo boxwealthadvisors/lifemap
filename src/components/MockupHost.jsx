@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import AuthModal from './AuthModal'
 import { useAuth } from '../contexts/AuthContext'
@@ -9,7 +9,6 @@ import ApiService from '../services/api'
 
 export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
   const navigate = useNavigate()
-  const location = useLocation()
   const { user, isAuthenticated, logout, loading: authLoading, admin } = useAuth()
   const adminUser = useAdminUser()
   const isAdminMode = !!adminUser?.userId
@@ -24,6 +23,7 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
   const persistChainRef = useRef(Promise.resolve())
   const pageRef = useRef(page)
   const [authOpen, setAuthOpen] = useState(false)
+  const [authMode, setAuthMode] = useState('signin')
   const [planReady, setPlanReady] = useState(false)
   const baseSrc = mockupSrc(page)
   const src = owned ? `${baseSrc}?owned=1` : baseSrc
@@ -79,6 +79,7 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       const id = userId || effectiveUserId
       if (!id) {
         pendingSaveRef.current = snapshot
+        setAuthMode('signin')
         setAuthOpen(true)
         return
       }
@@ -162,8 +163,7 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       navigate('/admin', { replace: true })
       return
     }
-    if (new URLSearchParams(location.search).get('signin')) setAuthOpen(true)
-  }, [authLoading, admin, isAdminMode, location.search, navigate])
+  }, [authLoading, admin, isAdminMode, navigate])
 
   useEffect(() => {
     if (authOpen) return
@@ -248,6 +248,8 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
           navigate('/profile')
           return
         }
+        const action = data.payload?.action
+        setAuthMode(action === 'signup' || action === 'register' ? 'signup' : 'signin')
         setAuthOpen(true)
         return
       }
@@ -301,6 +303,7 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
       {isAdminMode ? null : (
         <AuthModal
           isOpen={authOpen}
+          initialMode={authMode}
           onClose={() => {
             setAuthOpen(false)
             pendingSaveRef.current = null

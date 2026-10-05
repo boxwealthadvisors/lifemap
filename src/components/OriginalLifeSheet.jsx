@@ -2076,8 +2076,9 @@ export default function OriginalLifeSheet() {
                   </>
                 ) : (
                   <>
-                    <button type="button" className="lm-btn" onClick={() => { setAuthModalTab('login'); setShowAuthModal(true) }}>Sign in</button>
-                    <small>Accounts are created by an admin.</small>
+                    <button type="button" className="lm-btn" onClick={() => { setAuthModalTab('signup'); setShowAuthModal(true) }}>Sign up</button>
+                    <button type="button" className="lm-tlink" onClick={() => { setAuthModalTab('login'); setShowAuthModal(true) }}>Sign in</button>
+                    <small>We email a code to confirm your address.</small>
                   </>
                 )}
               </div>
