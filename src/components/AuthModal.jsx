@@ -511,10 +511,13 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated, initialMode, defaultTab }
                 BOX operations staff who support LifeMap, and BOX&apos;s privacy officer. Staff access to your
                 plan is logged.
               </p>
-              <p style={{ margin: 0 }}>
+              <p style={{ margin: '0 0 6px' }}>
                 You can ask us to correct your data, withdraw consent or raise a complaint at any time from
                 Privacy &amp; Data in your account. Read the full{' '}
                 <a href="/privacy" target="_blank" rel="noopener noreferrer" className="lm-tlink" style={{ textDecoration: 'underline' }}>Privacy Notice</a>.
+              </p>
+              <p style={{ margin: 0 }}>
+                LifeMap is for adults only (18+).
               </p>
             </div>
             <label
@@ -534,7 +537,7 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated, initialMode, defaultTab }
                 style={{ marginTop: 3 }}
               />
               <span>
-                I have read and agree to the{' '}
+                I confirm I am 18 or older, have read and agree to the{' '}
                 <a href="/privacy" target="_blank" rel="noopener noreferrer" className="lm-tlink" style={{ textDecoration: 'underline' }}>Privacy Notice</a>
                 {' '}and the{' '}
                 <a href="/terms" target="_blank" rel="noopener noreferrer" className="lm-tlink" style={{ textDecoration: 'underline' }}>Terms of Use</a>,

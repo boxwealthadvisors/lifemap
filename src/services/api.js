@@ -737,6 +737,37 @@ class ApiService {
     };
   }
 
+  async getActivityLogArchives(params = {}) {
+    return this.request(`/admin/activity-log/archives${toQuery(params)}`);
+  }
+
+  async downloadActivityLogArchive(day) {
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('authToken');
+    const response = await fetch(`${this.baseURL}/admin/activity-log/archives/${encodeURIComponent(day)}.csv`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      let message = `Archive download failed (${response.status})`;
+      try {
+        const parsed = JSON.parse(await response.text());
+        message = parsed.error || message;
+      } catch { /* keep default */ }
+      throw new Error(message);
+    }
+    return {
+      blob: await response.blob(),
+      filename: `lifemap-activity-log-${day}.csv`,
+    };
+  }
+
+  async runActivityLogArchive(day) {
+    return this.request('/admin/activity-log/archives/run', {
+      method: 'POST',
+      body: day ? { day } : {},
+    });
+  }
+
   async getDeletedItems() {
     return this.request('/admin/deleted-items');
   }

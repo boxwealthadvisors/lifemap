@@ -253,8 +253,17 @@ const STATEMENTS = [
   `ALTER TABLE super_admin ADD COLUMN IF NOT EXISTS totp_pending_secret VARCHAR`,
   // activity_log is APPEND-ONLY: the application only ever INSERTs and SELECTs. There must be no UPDATE or
   // DELETE statements against it, and it must never be truncated: entries are retained for at least one
-  // year (see docs/COMPLIANCE_OPS.md). Any retention archiving is a manual, audited DBA task.
+  // year (see docs/COMPLIANCE_OPS.md). Daily CSV snapshots go to activity_log_archive (see logArchive.js).
   `COMMENT ON TABLE activity_log IS 'Append-only audit trail. No UPDATE/DELETE/TRUNCATE; retain >= 1 year.'`,
+  `CREATE TABLE IF NOT EXISTS activity_log_archive (
+      id SERIAL PRIMARY KEY,
+      day DATE NOT NULL UNIQUE,
+      row_count INTEGER NOT NULL DEFAULT 0,
+      csv_content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`,
+  `CREATE INDEX IF NOT EXISTS idx_activity_log_archive_day ON activity_log_archive(day DESC)`,
+  `COMMENT ON TABLE activity_log_archive IS 'Daily CSV snapshots of activity_log for 180-day / 1-year retention. Pruned after LOG_ARCHIVE_RETENTION_DAYS (default 400).'`,
 ]
 
 export async function ensureLifemapMockupSchema(pool) {

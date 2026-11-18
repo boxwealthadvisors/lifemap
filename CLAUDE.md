@@ -43,9 +43,13 @@ Backend env (do not wipe):
 - `OPENAI_API_KEY` = optional, expense classify fallback
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` = email OTP for public signup (or `RESEND_API_KEY` instead)
 - `APP_BASE_URL` = `https://lifemap.finance` (invite/reset links)
-- `PRIVACY_CONTACT` / `PRIVACY_CONTACT_NAME` = grievance mailbox and officer name
+- `PRIVACY_CONTACT` = `arunwealthmanagement@gmail.com` (interim)
+- `PRIVACY_CONTACT_NAME` = `Arun Mandal`
+- `DATA_HOSTING_REGION` = confirm Render Postgres region (default Oregon, United States)
 - `TOTP_ENC_KEY` = optional; encrypts staff authenticator secrets (else `JWT_SECRET`)
-- Ops runbook: `docs/COMPLIANCE_OPS.md` (CERT-In 6h, encryption, log retention, India residency)
+- Super Admin OTP email = `arun@boxwealth.in` (set on `super_admin.email`, not env)
+- Daily log archive: `activity_log_archive` (400 days); optional `LOG_ARCHIVE_WEBHOOK_URL`
+- Ops runbook: `docs/COMPLIANCE_OPS.md` (CERT-In owners Amit/Arun, Oregon hosting, log retention)
 
 **Never set `DATABASE_INIT=true`.** That runs a wipe-and-recreate script.
 

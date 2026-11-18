@@ -14,6 +14,12 @@ import {
 
 const REQUEST_TYPES = [
   {
+    value: 'data_summary',
+    label: 'Ask for a data summary',
+    help: 'Ask for a summary of the personal data we hold, how we use it, and who we have shared it with.',
+    detailsRequired: false,
+  },
+  {
     value: 'correction',
     label: 'Correct my data',
     help: 'Tell us what is wrong and what it should say.',
@@ -21,14 +27,20 @@ const REQUEST_TYPES = [
   },
   {
     value: 'withdraw_consent',
-    label: 'Withdraw my consent',
-    help: 'We will stop processing your data and may close your account. Add a note if you like.',
+    label: 'Withdraw consent / close account',
+    help: 'We will stop processing your data and close your account, except records we must keep by law.',
     detailsRequired: false,
   },
   {
     value: 'complaint',
     label: 'Raise a complaint',
     help: 'Describe your concern about how your personal data is handled.',
+    detailsRequired: true,
+  },
+  {
+    value: 'nomination',
+    label: 'Nominate a person',
+    help: 'Name someone who may exercise your privacy rights if you die or are unable to. Include their name, email and relationship.',
     detailsRequired: true,
   },
 ];
@@ -178,7 +190,7 @@ export default function PrivacyDataPage() {
       <div id="sec-register">
         <PageHeader
           title="Privacy & Data"
-          description="Your rights over the personal data LifeMap holds about you: ask for a correction, withdraw consent, or raise a complaint. We aim to respond within 90 days."
+          description="Your rights under the DPDP Act: request a data summary, correction, withdrawal of consent / account closure, a complaint, or nominate someone to act for you. We aim to respond within 90 days."
         />
 
         <div className="lm-card" style={{ marginBottom: 16 }}>

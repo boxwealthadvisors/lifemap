@@ -19,6 +19,7 @@ import {
   PRIVACY_CONTACT,
   PRIVACY_CONTACT_NAME,
   PRIVACY_NOTICE_VERSION,
+  DATA_HOSTING_REGION,
   RESET_TTL_MS,
   alertSuperAdmins,
   clearFailures,
@@ -46,7 +47,7 @@ import {
 const router = express.Router();
 
 const OTP_PURPOSES = ['signup', 'login', 'sensitive'];
-const PRIVACY_REQUEST_TYPES = ['correction', 'withdraw_consent', 'complaint'];
+const PRIVACY_REQUEST_TYPES = ['data_summary', 'correction', 'withdraw_consent', 'complaint', 'nomination'];
 const PRIVACY_RESPONSE_DAYS = 90;
 const PENDING_TOKEN_TTL = '5m';
 
@@ -985,6 +986,7 @@ router.get('/privacy-meta', (req, res) => {
     contact: PRIVACY_CONTACT,
     contactEmail: PRIVACY_CONTACT,
     contactName: PRIVACY_CONTACT_NAME,
+    hostingRegion: DATA_HOSTING_REGION,
     privacyUrl: `${APP_BASE_URL}/privacy`,
     termsUrl: `${APP_BASE_URL}/terms`,
   });

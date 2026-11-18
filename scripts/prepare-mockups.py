@@ -338,6 +338,16 @@ __MARKER_START__
         post("navigate", { path: "/insurance" });
         return;
       }
+      if (/^terms$/i.test(label) || href === "/terms" || href.indexOf("/terms") === 0) {
+        e.preventDefault();
+        post("navigate", { path: "/terms" });
+        return;
+      }
+      if (/^privacy$/i.test(label) || href === "/privacy" || href.indexOf("/privacy") === 0) {
+        e.preventDefault();
+        post("navigate", { path: "/privacy" });
+        return;
+      }
       if (a.classList.contains("gate")) { e.preventDefault(); return; }
       if (ROUTES[file]) {
         e.preventDefault();

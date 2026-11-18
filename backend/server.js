@@ -31,6 +31,7 @@ import cookieParser from 'cookie-parser';
 import pool from './config/database.js';
 import { ensureLifemapMockupSchema } from './scripts/ensure-lifemap-mockup-schema.js';
 import { purgeExpiredDeletedItems } from './lib/security.js';
+import { runDailyLogArchive } from './lib/logArchive.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -349,7 +350,10 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 
 // Start server after schema patches so new mockup columns exist
 ensureLifemapMockupSchema(pool)
-  .then(() => purgeExpiredDeletedItems())
+  .then(async () => {
+    await purgeExpiredDeletedItems();
+    await runDailyLogArchive();
+  })
   .catch((error) => {
     console.error('[migrate] LifeMap mockup schema failed (server will still start):', error.message);
   })
@@ -362,6 +366,14 @@ ensureLifemapMockupSchema(pool)
       });
     }, PURGE_INTERVAL_MS);
     purgeTimer.unref?.();
+
+    // CERT-In / DPDP log retention: daily CSV snapshot of activity_log (180 days now; 1 year from May 2027).
+    const archiveTimer = setInterval(() => {
+      runDailyLogArchive().catch((error) => {
+        console.error('[log-archive] scheduled job failed:', error.message);
+      });
+    }, PURGE_INTERVAL_MS);
+    archiveTimer.unref?.();
 
     app.listen(PORT, () => {
       console.log(`🚀 Life Sheet Backend Server running on port ${PORT}`);

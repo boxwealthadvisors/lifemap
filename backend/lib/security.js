@@ -2,10 +2,12 @@ import crypto from 'crypto'
 import pool from '../config/database.js'
 import { sendMail } from './mailer.js'
 
-export const PRIVACY_NOTICE_VERSION = 'v1.0-2026-11-16'
+export const PRIVACY_NOTICE_VERSION = 'v1.1-2026-11-18'
 export const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.CORS_ORIGIN?.split(',')[0]?.trim() || 'https://lifemap.finance').replace(/\/$/, '')
-export const PRIVACY_CONTACT = process.env.PRIVACY_CONTACT || 'privacy@boxwealth.in'
-export const PRIVACY_CONTACT_NAME = process.env.PRIVACY_CONTACT_NAME || 'BOX Wealth Privacy Officer'
+export const PRIVACY_CONTACT = process.env.PRIVACY_CONTACT || 'arunwealthmanagement@gmail.com'
+export const PRIVACY_CONTACT_NAME = process.env.PRIVACY_CONTACT_NAME || 'Arun Mandal'
+/** Render Postgres region shown in the Privacy Notice. Confirm in Render → DB → Info → Region. */
+export const DATA_HOSTING_REGION = process.env.DATA_HOSTING_REGION || 'Oregon, United States (Render)'
 export const LOCKOUT_MS = 15 * 60 * 1000
 export const MAX_FAILED_ATTEMPTS = 5
 export const OTP_TTL_MS = 10 * 60 * 1000

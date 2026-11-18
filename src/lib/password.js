@@ -13,9 +13,9 @@ export function passwordProblem(value) {
   return null;
 }
 
-export const PRIVACY_CONTACT_FALLBACK = 'privacy@boxwealth.in';
-export const PRIVACY_CONTACT_NAME_FALLBACK = 'BOX Wealth Privacy Officer';
-export const PRIVACY_NOTICE_VERSION_FALLBACK = 'v1.0-2026-11-16';
+export const PRIVACY_CONTACT_FALLBACK = 'arunwealthmanagement@gmail.com';
+export const PRIVACY_CONTACT_NAME_FALLBACK = 'Arun Mandal';
+export const PRIVACY_NOTICE_VERSION_FALLBACK = 'v1.1-2026-11-18';
 
 export function formatDate(value) {
   if (!value) return '—';

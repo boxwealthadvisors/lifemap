@@ -23,6 +23,12 @@ import {
   softDeleteEntity,
   validateStrongPassword,
 } from '../lib/security.js';
+import {
+  archiveActivityLogDay,
+  getLogArchiveCsv,
+  listLogArchives,
+  runDailyLogArchive,
+} from '../lib/logArchive.js';
 
 const router = express.Router();
 
@@ -1493,6 +1499,66 @@ router.get('/activity-log/export.csv', authenticateAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error exporting activity log:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Daily CSV snapshots for CERT-In / DPDP retention (super admin only)
+router.get('/activity-log/archives', authenticateAdmin, async (req, res) => {
+  try {
+    if (req.admin.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Super admin only' });
+    }
+    const limit = Math.min(Math.max(Number(req.query.limit) || 60, 1), 366);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const data = await listLogArchives({ limit, offset });
+    res.json(data);
+  } catch (error) {
+    console.error('Error listing log archives:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/activity-log/archives/:day.csv', authenticateAdmin, async (req, res) => {
+  try {
+    if (req.admin.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Super admin only' });
+    }
+    const day = String(req.params.day || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      return res.status(400).json({ error: 'Use YYYY-MM-DD' });
+    }
+    const row = await getLogArchiveCsv(day);
+    if (!row) return res.status(404).json({ error: 'No archive for that day' });
+
+    await logActivity({
+      ...actorOf(req),
+      action: 'activity_log_archive_downloaded',
+      targetType: 'activity_log_archive',
+      meta: { day, rowCount: row.row_count },
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="lifemap-activity-log-${day}.csv"`);
+    res.send(`\uFEFF${row.csv_content}`);
+  } catch (error) {
+    console.error('Error downloading log archive:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/activity-log/archives/run', authenticateAdmin, async (req, res) => {
+  try {
+    if (req.admin.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Super admin only' });
+    }
+    const day = req.body?.day ? String(req.body.day) : undefined;
+    const result = day
+      ? await archiveActivityLogDay(day)
+      : await runDailyLogArchive();
+    res.json({ message: 'Archive job finished', result });
+  } catch (error) {
+    console.error('Error running log archive:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
 });
 

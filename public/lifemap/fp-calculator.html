@@ -752,7 +752,7 @@ footer a{color:#c3d3ea; text-decoration:none} footer a:hover{color:#fff}
   <div class="wrap">
     <span class="brand"><span class="mark"></span><span class="name" style="color:#fff">LifeMap</span></span>
     <span class="tag">Invest with Intent.</span>
-    <span style="margin-left:auto"><a href="#">Terms</a> &nbsp;&middot;&nbsp; <a href="#">Privacy</a> &nbsp;&middot;&nbsp; <a href="#">Talk to an advisor</a></span>
+    <span style="margin-left:auto"><a href="/terms">Terms</a> &nbsp;&middot;&nbsp; <a href="/privacy">Privacy</a> &nbsp;&middot;&nbsp; <a href="mailto:arun@boxwealth.in">Talk to an advisor</a></span>
   </div>
   <div class="disclaimer">
     LifeMap is an educational planning tool from BOX Wealth Advisors. The financial-freedom age is an illustration based on the assumptions you enter, not a forecast or a recommendation. It uses salary, work-asset streams and family-member income, each with its own growth rate and end age; personal assets are not sold to fund the plan; a holding with a maturity date leaves the growing pool on that date and its payout joins a shared cash pool that does not grow; an income fund keeps its own IRR until each income payout and the terminal lumpsum also move into that cash pool; a future-dated holding is bought from that cash pool on its start date; loan instalments repay the balance without interest; and your spending pattern holds in real terms. It does not model tax, healthcare shocks or market sequence risk. Past performance is not indicative of future results.
@@ -2178,6 +2178,16 @@ refresh();
       if (/^insurance$/i.test(label) && (a.classList.contains("ptab") || href === "/insurance" || href === "#")) {
         e.preventDefault();
         post("navigate", { path: "/insurance" });
+        return;
+      }
+      if (/^terms$/i.test(label) || href === "/terms" || href.indexOf("/terms") === 0) {
+        e.preventDefault();
+        post("navigate", { path: "/terms" });
+        return;
+      }
+      if (/^privacy$/i.test(label) || href === "/privacy" || href.indexOf("/privacy") === 0) {
+        e.preventDefault();
+        post("navigate", { path: "/privacy" });
         return;
       }
       if (a.classList.contains("gate")) { e.preventDefault(); return; }

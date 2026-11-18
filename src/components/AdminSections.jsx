@@ -148,6 +148,10 @@ export function ActivityLogSection({ isSuper = false, admins = [] }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [archives, setArchives] = useState([]);
+  const [archivesTotal, setArchivesTotal] = useState(0);
+  const [archivesLoading, setArchivesLoading] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,7 +166,22 @@ export function ActivityLogSection({ isSuper = false, admins = [] }) {
     }
   }, [applied, offset]);
 
+  const loadArchives = useCallback(async () => {
+    if (!isSuper) return;
+    setArchivesLoading(true);
+    try {
+      const res = await ApiService.getActivityLogArchives({ limit: 30 });
+      setArchives(res.archives || []);
+      setArchivesTotal(res.total || 0);
+    } catch (error) {
+      toast.error(error.message || 'Could not load daily archives');
+    } finally {
+      setArchivesLoading(false);
+    }
+  }, [isSuper]);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadArchives(); }, [loadArchives]);
 
   const applyFilters = (e) => {
     e.preventDefault();
@@ -189,10 +208,39 @@ export function ActivityLogSection({ isSuper = false, admins = [] }) {
     }
   };
 
+  const handleDownloadArchive = async (day) => {
+    try {
+      const { blob, filename } = await ApiService.downloadActivityLogArchive(day);
+      downloadBlob(blob, filename);
+      toast.success(`Downloaded archive for ${day}`);
+    } catch (error) {
+      toast.error(error.message || 'Archive download failed');
+    }
+  };
+
+  const handleRunArchive = async () => {
+    try {
+      setArchiveBusy(true);
+      const res = await ApiService.runActivityLogArchive();
+      const archived = res?.result?.archived || res?.result;
+      toast.success(
+        archived?.skipped
+          ? `Archive already exists for ${archived.day}`
+          : `Archived ${archived?.rowCount ?? 0} rows for ${archived?.day || 'yesterday'}`
+      );
+      await loadArchives();
+    } catch (error) {
+      toast.error(error.message || 'Archive job failed');
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
   const from = total === 0 ? 0 : offset + 1;
   const to = Math.min(offset + PAGE_SIZE, total);
 
   return (
+    <>
     <div className="lm-card">
       <div className="lm-reghead">
         <h3>{isSuper ? 'Activity log' : 'Team activity'}</h3>
@@ -309,6 +357,61 @@ export function ActivityLogSection({ isSuper = false, admins = [] }) {
         </span>
       </div>
     </div>
+
+    {isSuper ? (
+      <div className="lm-card" style={{ marginTop: 16 }}>
+        <div className="lm-reghead">
+          <h3>Daily archives</h3>
+          <span className="count">{archivesTotal} days</span>
+          <div className="r">
+            <button type="button" className="lm-ghost" onClick={handleRunArchive} disabled={archiveBusy}>
+              {archiveBusy ? 'Archiving…' : 'Archive yesterday now'}
+            </button>
+          </div>
+        </div>
+        <p className="lm-hint" style={{ padding: '0 16px 8px', margin: 0 }}>
+          Nightly CSV snapshots of the activity log (kept 400 days). Live log rows are never deleted.
+          Optional: set <code>LOG_ARCHIVE_WEBHOOK_URL</code> to also push each day to external storage.
+        </p>
+        <div className="lm-tblwrap">
+          <table className="lm-tbl">
+            <thead>
+              <tr>
+                <th>Day (UTC)</th>
+                <th>Rows</th>
+                <th>Size</th>
+                <th>Archived at</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {archivesLoading && archives.length === 0 ? (
+                <tr><td className="empty" colSpan={5}>Loading…</td></tr>
+              ) : archives.length === 0 ? (
+                <tr><td className="empty" colSpan={5}>No daily archives yet — run “Archive yesterday now” or wait for the nightly job.</td></tr>
+              ) : archives.map((row) => {
+                const day = typeof row.day === 'string' ? row.day.slice(0, 10) : new Date(row.day).toISOString().slice(0, 10);
+                const kb = row.bytes != null ? `${Math.max(1, Math.round(Number(row.bytes) / 1024))} KB` : '—';
+                return (
+                  <tr key={row.id || day}>
+                    <td>{day}</td>
+                    <td>{row.row_count}</td>
+                    <td>{kb}</td>
+                    <td>{formatDateTime(row.created_at)}</td>
+                    <td>
+                      <button type="button" className="lm-ghost" onClick={() => handleDownloadArchive(day)}>
+                        Download CSV
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
 
