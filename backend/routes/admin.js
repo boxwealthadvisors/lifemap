@@ -8,12 +8,17 @@ import {
   INVITE_TTL_MS,
   PRIVACY_CONTACT,
   RESET_TTL_MS,
+  consumeOtp,
   createResetOrInviteToken,
   isBoxWealthEmail,
+  isRegisterEntity,
   logActivity,
+  logPlanView,
   newToken,
   normalizeEmail,
+  purgeRegisterItemsForUser,
   resetLink,
+  restoreRegisterRow,
   revokeAllSessions,
   softDeleteEntity,
   validateStrongPassword,
@@ -136,6 +141,75 @@ function userSnapshot(row) {
   return rest;
 }
 
+// Staff changing username / email / password: current password + an emailed "sensitive" code.
+// Sends the error response itself and returns null when something is missing or wrong; otherwise returns
+// `{ consume }`, which burns the emailed code (call it once the update is certain to go ahead).
+async function checkSensitiveProof({ res, passwordHash, currentPassword, otp, emailOnFile }) {
+  if (!currentPassword || !otp) {
+    res.status(400).json({
+      error: 'Changing your username, email or password needs your current password and the security code we email you',
+      requires: ['current_password', 'otp'],
+    });
+    return null;
+  }
+  const ok = await bcrypt.compare(String(currentPassword), passwordHash || '');
+  if (!ok) {
+    res.status(401).json({ error: 'Current password is incorrect' });
+    return null;
+  }
+  if (!emailOnFile) {
+    res.status(400).json({ error: 'No email address is on file for this account. Ask a super admin to add one first.' });
+    return null;
+  }
+  return {
+    consume: async () => {
+      const code = await consumeOtp(emailOnFile, 'sensitive', otp);
+      if (code.error) {
+        res.status(code.status || 400).json({ error: code.error });
+        return false;
+      }
+      return true;
+    },
+  };
+}
+
+async function notifySecurityChange({
+  previousEmail, newEmail, label, contactHint, usernameChanging, previousUsername, username, passwordChanging,
+}) {
+  const parts = [];
+  if (usernameChanging) parts.push(`Your username was changed from "${previousUsername}" to "${username}". `);
+  if (passwordChanging) parts.push('Your password was changed. ');
+  if (newEmail) parts.push(`Your email was changed to ${maskEmail(newEmail)}. `);
+  await notifyEmail(
+    previousEmail,
+    `Your ${label} security settings changed`,
+    `${parts.join('')}\n\nIf this was not you, ${contactHint}.`
+  );
+  if (newEmail) {
+    await notifyEmail(newEmail, 'Your LifeMap email address was updated', `This address is now the contact email for your ${label}.`);
+  }
+}
+
+// One activity entry per kind of change (username / email / password)
+async function logSecurityChanges(req, kind, { usernameChanging, emailChanging, passwordChanging, previousUsername, username }) {
+  const prefix = kind === 'super_admin' ? 'super_admin' : 'admin';
+  const base = {
+    ...actorOf(req),
+    targetType: kind,
+    targetId: req.admin.id,
+    teamAdminId: kind === 'admin' ? req.admin.id : null,
+  };
+  if (usernameChanging) {
+    await logActivity({ ...base, action: `${prefix}_username_changed`, meta: { from: previousUsername, to: username } });
+  }
+  if (emailChanging) {
+    await logActivity({ ...base, action: `${prefix}_email_changed` });
+  }
+  if (passwordChanging) {
+    await logActivity({ ...base, action: `${prefix}_password_changed` });
+  }
+}
+
 // ==================== LEGACY LOGIN ENDPOINTS (superseded by OTP login) ====================
 
 const loginMoved = (req, res) =>
@@ -178,7 +252,8 @@ router.put('/admin/profile', authenticateAdmin, [
     if (problem) throw new Error(problem);
     return true;
   }),
-  body('current_password').optional({ values: 'falsy' })
+  body('current_password').optional({ values: 'falsy' }),
+  body('otp').optional({ values: 'falsy' }),
 ], async (req, res) => {
   try {
     if (req.admin.role !== 'admin') {
@@ -192,29 +267,32 @@ router.put('/admin/profile', authenticateAdmin, [
     const password = req.body.password || undefined;
     const currentPassword = req.body.current_password;
 
-    const currentRow = await pool.query('SELECT password_hash, email FROM admin WHERE id = $1', [req.admin.id]);
+    const currentRow = await pool.query('SELECT password_hash, email, username FROM admin WHERE id = $1', [req.admin.id]);
     const previousEmail = currentRow.rows[0]?.email || null;
+    const previousUsername = currentRow.rows[0]?.username || null;
+    const usernameChanging = username !== undefined && username !== previousUsername;
     const emailChanging = email !== undefined && email !== normalizeEmail(previousEmail);
+    const passwordChanging = Boolean(password);
+    const sensitiveChange = usernameChanging || emailChanging || passwordChanging;
 
-    if (password || emailChanging) {
-      if (!currentPassword) {
-        return res.status(400).json({
-          error: password
-            ? 'Current password is required to set a new password'
-            : 'Current password is required to change your email'
-        });
-      }
-      const ok = await bcrypt.compare(currentPassword, currentRow.rows[0].password_hash);
-      if (!ok) {
-        return res.status(401).json({ error: 'Current password is incorrect' });
-      }
+    // ANY change to username, email or password needs the current password AND an emailed security code.
+    let proof = null;
+    if (sensitiveChange) {
+      proof = await checkSensitiveProof({
+        res,
+        passwordHash: currentRow.rows[0]?.password_hash,
+        currentPassword,
+        otp: req.body.otp,
+        emailOnFile: previousEmail,
+      });
+      if (!proof) return;
     }
 
     const updates = [];
     const values = [];
     let paramCount = 1;
 
-    if (username !== undefined) {
+    if (usernameChanging) {
       const taken = await pool.query('SELECT id FROM admin WHERE username = $1 AND id != $2', [username, req.admin.id]);
       if (taken.rows.length > 0) {
         return res.status(400).json({ error: 'Username already taken' });
@@ -246,6 +324,9 @@ router.put('/admin/profile', authenticateAdmin, [
       return res.status(400).json({ error: 'No fields to update' });
     }
 
+    // Burn the emailed code only once we know the update will go ahead.
+    if (proof && !(await proof.consume())) return;
+
     updates.push('updated_at = NOW()');
     values.push(req.admin.id);
     const result = await pool.query(
@@ -253,32 +334,27 @@ router.put('/admin/profile', authenticateAdmin, [
       values
     );
 
-    if (password) {
+    if (passwordChanging) {
       await revokeAllSessions('admin', req.admin.id);
     }
 
-    if (password || emailChanging) {
-      await notifyEmail(
+    if (sensitiveChange) {
+      await notifySecurityChange({
         previousEmail,
-        'Your LifeMap account security settings changed',
-        `${password ? 'Your password was changed. ' : ''}${emailChanging ? `Your email was changed to ${maskEmail(email)}. ` : ''}\n\nIf this was not you, contact a super admin immediately.`
-      );
-      if (emailChanging) {
-        await notifyEmail(email, 'Your LifeMap email address was updated', 'This address is now the contact email for your LifeMap admin account.');
-      }
-      await logActivity({
-        ...actorOf(req),
-        action: password ? 'admin_password_changed' : 'admin_email_changed',
-        targetType: 'admin',
-        targetId: req.admin.id,
-        teamAdminId: req.admin.id,
-        meta: { password: Boolean(password), emailChanged: emailChanging },
+        newEmail: emailChanging ? email : null,
+        label: 'LifeMap account',
+        contactHint: 'contact a super admin immediately',
+        usernameChanging,
+        previousUsername,
+        username,
+        passwordChanging,
       });
+      await logSecurityChanges(req, 'admin', { usernameChanging, emailChanging, passwordChanging, previousUsername, username });
     }
 
     res.json({
-      message: password ? 'Account updated. Sign in again with your new password.' : 'Account updated',
-      reauthRequired: Boolean(password),
+      message: passwordChanging ? 'Account updated. Sign in again with your new password.' : 'Account updated',
+      reauthRequired: passwordChanging,
       admin: { ...result.rows[0], role: 'admin' }
     });
   } catch (error) {
@@ -296,7 +372,8 @@ router.put('/super-admin/profile', authenticateSuperAdmin, [
     if (problem) throw new Error(problem);
     return true;
   }),
-  body('current_password').optional({ values: 'falsy' })
+  body('current_password').optional({ values: 'falsy' }),
+  body('otp').optional({ values: 'falsy' }),
 ], async (req, res) => {
   try {
     if (validationFailed(req, res)) return;
@@ -306,29 +383,32 @@ router.put('/super-admin/profile', authenticateSuperAdmin, [
     const password = req.body.password || undefined;
     const currentPassword = req.body.current_password;
 
-    const currentRow = await pool.query('SELECT password_hash, email FROM super_admin WHERE id = $1', [req.admin.id]);
+    const currentRow = await pool.query('SELECT password_hash, email, username FROM super_admin WHERE id = $1', [req.admin.id]);
     const previousEmail = currentRow.rows[0]?.email || null;
+    const previousUsername = currentRow.rows[0]?.username || null;
+    const usernameChanging = username !== undefined && username !== previousUsername;
     const emailChanging = email !== undefined && email !== normalizeEmail(previousEmail);
+    const passwordChanging = Boolean(password);
+    const sensitiveChange = usernameChanging || emailChanging || passwordChanging;
 
-    if (password || emailChanging) {
-      if (!currentPassword) {
-        return res.status(400).json({
-          error: password
-            ? 'Current password is required to set a new password'
-            : 'Current password is required to change your email'
-        });
-      }
-      const ok = await bcrypt.compare(currentPassword, currentRow.rows[0].password_hash);
-      if (!ok) {
-        return res.status(401).json({ error: 'Current password is incorrect' });
-      }
+    // ANY change to username, email or password needs the current password AND an emailed security code.
+    let proof = null;
+    if (sensitiveChange) {
+      proof = await checkSensitiveProof({
+        res,
+        passwordHash: currentRow.rows[0]?.password_hash,
+        currentPassword,
+        otp: req.body.otp,
+        emailOnFile: previousEmail,
+      });
+      if (!proof) return;
     }
 
     const updates = [];
     const values = [];
     let paramCount = 1;
 
-    if (username !== undefined) {
+    if (usernameChanging) {
       const taken = await pool.query('SELECT id FROM super_admin WHERE username = $1 AND id != $2', [username, req.admin.id]);
       if (taken.rows.length > 0) {
         return res.status(400).json({ error: 'Username already taken' });
@@ -349,6 +429,9 @@ router.put('/super-admin/profile', authenticateSuperAdmin, [
       return res.status(400).json({ error: 'No fields to update' });
     }
 
+    // Burn the emailed code only once we know the update will go ahead.
+    if (proof && !(await proof.consume())) return;
+
     updates.push('updated_at = NOW()');
     values.push(req.admin.id);
     const result = await pool.query(
@@ -356,27 +439,26 @@ router.put('/super-admin/profile', authenticateSuperAdmin, [
       values
     );
 
-    if (password) {
+    if (passwordChanging) {
       await revokeAllSessions('super_admin', req.admin.id);
     }
-    if (password || emailChanging) {
-      await notifyEmail(
+    if (sensitiveChange) {
+      await notifySecurityChange({
         previousEmail,
-        'Your LifeMap super admin security settings changed',
-        `${password ? 'Your password was changed. ' : ''}${emailChanging ? `Your email was changed to ${maskEmail(email)}. ` : ''}\n\nIf this was not you, act immediately.`
-      );
-      await logActivity({
-        ...actorOf(req),
-        action: password ? 'super_admin_password_changed' : 'super_admin_email_changed',
-        targetType: 'super_admin',
-        targetId: req.admin.id,
-        meta: { password: Boolean(password), emailChanged: emailChanging },
+        newEmail: emailChanging ? email : null,
+        label: 'LifeMap super admin account',
+        contactHint: 'act immediately',
+        usernameChanging,
+        previousUsername,
+        username,
+        passwordChanging,
       });
+      await logSecurityChanges(req, 'super_admin', { usernameChanging, emailChanging, passwordChanging, previousUsername, username });
     }
 
     res.json({
-      message: password ? 'Account updated. Sign in again with your new password.' : 'Account updated',
-      reauthRequired: Boolean(password),
+      message: passwordChanging ? 'Account updated. Sign in again with your new password.' : 'Account updated',
+      reauthRequired: passwordChanging,
       admin: { ...result.rows[0], role: 'super_admin' }
     });
   } catch (error) {
@@ -499,6 +581,14 @@ async function offboardAdmin({ req, adminId, reassignTo, mode, reason }) {
     }
   }
 
+  // Remember who the admin's clients were so a later restore can hand them back.
+  const clientIds = clientCount > 0
+    ? (await pool.query(
+        'SELECT id FROM "user" WHERE admin_id = $1 AND deleted_at IS NULL ORDER BY id',
+        [adminId]
+      )).rows.map((r) => r.id)
+    : [];
+
   await withTx(async (db) => {
     if (clientCount > 0) {
       await db.query(
@@ -522,7 +612,12 @@ async function offboardAdmin({ req, adminId, reassignTo, mode, reason }) {
     await softDeleteEntity({
       entityType: 'admin',
       entityId: adminId,
-      payload: { ...userSnapshot(admin), reassignedClients: clientCount, reassignedTo: target?.id || null },
+      payload: {
+        ...userSnapshot(admin),
+        reassignedClients: clientCount,
+        reassignedTo: target?.id || null,
+        clientIds,
+      },
       deletedByRole: req.admin.role,
       deletedById: req.admin.id,
       reason,
@@ -812,21 +907,22 @@ router.post('/admins/:id/send-reset', authenticateSuperAdmin, [idParam('id')], a
 
 // ==================== SUPER ADMIN - USER MANAGEMENT ====================
 
-// Transfer user to different admin (super admin only)
+// Transfer user to a different ACTIVE admin (super admin only). There is no "unassigned" target.
 router.put('/super-admin/users/:userId/transfer', authenticateSuperAdmin, [
   idParam('userId'),
-  body('admin_id').optional({ values: 'null' }).isInt({ min: 1 }),
   body('reason').trim().isLength({ min: 3 }).withMessage('A reason for the transfer is required'),
 ], async (req, res) => {
   try {
     if (validationFailed(req, res)) return;
-    if (req.body.admin_id === undefined) {
-      return res.status(400).json({ error: 'admin_id is required (use null to unassign)' });
+    // Clients are never moved to an "unassigned" pool: a transfer must name an active admin.
+    const rawAdminId = req.body.admin_id;
+    if (rawAdminId === undefined || rawAdminId === null || rawAdminId === '' || !Number.isInteger(Number(rawAdminId)) || Number(rawAdminId) < 1) {
+      return res.status(400).json({ error: 'You must assign the client to an active admin (admin_id is required).' });
     }
 
     const { userId } = req.params;
     const reason = String(req.body.reason).trim();
-    const newAdminId = req.body.admin_id === null ? null : Number(req.body.admin_id);
+    const newAdminId = Number(rawAdminId);
 
     const userCheck = await pool.query(
       'SELECT id, name, admin_id FROM "user" WHERE id = $1 AND deleted_at IS NULL',
@@ -840,12 +936,9 @@ router.put('/super-admin/users/:userId/transfer', authenticateSuperAdmin, [
       return res.status(400).json({ error: 'User is already assigned to this admin' });
     }
 
-    let newAdmin = null;
-    if (newAdminId !== null) {
-      newAdmin = await getActiveAdmin(newAdminId);
-      if (!newAdmin) {
-        return res.status(404).json({ error: 'Admin not found or not active' });
-      }
+    const newAdmin = await getActiveAdmin(newAdminId);
+    if (!newAdmin) {
+      return res.status(400).json({ error: 'You must assign the client to an active admin. That admin was not found or is not active.' });
     }
     let oldAdmin = null;
     if (user.admin_id) {
@@ -882,10 +975,10 @@ router.put('/super-admin/users/:userId/transfer', authenticateSuperAdmin, [
       await notifyEmail(
         oldAdmin.email,
         'LifeMap: a client was transferred away from you',
-        `Client "${user.name}" was transferred ${newAdmin ? `to advisor "${newAdmin.username}"` : 'to the unassigned pool'}.\nReason: ${reason}`
+        `Client "${user.name}" was transferred to advisor "${newAdmin.username}".\nReason: ${reason}`
       );
     }
-    if (newAdmin?.email) {
+    if (newAdmin.email) {
       await notifyEmail(
         newAdmin.email,
         'LifeMap: a client was transferred to you',
@@ -1270,6 +1363,25 @@ function buildActivityFilter(req) {
     where.push(`al.action = $${params.length}`);
   }
 
+  // clientId: anything that involved this client (they acted, or staff acted on them)
+  if (req.query.clientId) {
+    const clientId = Number.parseInt(req.query.clientId, 10);
+    if (Number.isNaN(clientId)) return { error: 'clientId must be a number' };
+    params.push(clientId);
+    const n = params.length;
+    where.push(
+      `((al.target_type = 'user' AND al.target_id = $${n}) OR (al.actor_role = 'client' AND al.actor_id = $${n}))`
+    );
+  }
+
+  // userId: the actor (staff or client) that performed the action
+  if (req.query.userId) {
+    const userId = Number.parseInt(req.query.userId, 10);
+    if (Number.isNaN(userId)) return { error: 'userId must be a number' };
+    params.push(userId);
+    where.push(`al.actor_id = $${params.length}`);
+  }
+
   const from = parseDateBound(req.query.from, false);
   if (from.error) return { error: from.error };
   if (from.value) {
@@ -1397,10 +1509,15 @@ router.get('/deleted-items', authenticateAdmin, async (req, res) => {
     const result = await pool.query(
       `SELECT di.id, di.entity_type, di.entity_id, di.reason, di.deleted_by_role, di.deleted_by_id,
               di.deleted_at, di.purge_after, di.restored_at,
-              COALESCE(di.payload->>'name', di.payload->>'username') AS label,
-              di.payload->>'email' AS email,
-              di.payload->>'username' AS username
+              COALESCE(di.legal_hold, FALSE) AS legal_hold,
+              COALESCE(di.payload->>'name', di.payload->>'username', di.payload->>'description',
+                       di.payload->>'stream', di.payload->>'policy_type', di.payload->>'lender') AS label,
+              COALESCE(di.payload->>'email', ou.email) AS email,
+              di.payload->>'username' AS username,
+              ou.name AS client_name
        FROM deleted_items di
+       LEFT JOIN "user" ou
+         ON di.entity_type NOT IN ('user', 'admin') AND ou.id::text = di.payload->>'user_id'
        WHERE di.restored_at IS NULL ${scope}
        ORDER BY di.deleted_at DESC`,
       params
@@ -1425,6 +1542,9 @@ router.post('/deleted-items/:id/restore', authenticateSuperAdmin, [idParam('id')
 
     let message;
     let teamAdminId = null;
+    let restoredClientCount = 0;
+    let restoredAdminEmail = null;
+    let restoredUserId = null;
 
     await withTx(async (db) => {
       if (item.entity_type === 'user') {
@@ -1457,31 +1577,78 @@ router.post('/deleted-items/:id/restore', authenticateSuperAdmin, [idParam('id')
           [item.entity_id]
         );
         if (!row.rows[0]) throw Object.assign(new Error('gone'), { statusCode: 404 });
+
+        // Hand the admin's clients back: those recorded at delete time that are still with the admin they were
+        // reassigned to, or are unassigned. Clients that were transferred elsewhere since stay where they are.
+        const payload = typeof item.payload === 'string' ? JSON.parse(item.payload) : (item.payload || {});
+        const clientIds = (Array.isArray(payload.clientIds) ? payload.clientIds : [])
+          .map(Number)
+          .filter((n) => Number.isInteger(n) && n > 0);
+        if (clientIds.length > 0) {
+          const moved = await db.query(
+            `UPDATE "user" SET admin_id = $1, updated_at = NOW()
+             WHERE id = ANY($2::int[]) AND deleted_at IS NULL
+               AND (admin_id IS NULL OR ($3::int IS NOT NULL AND admin_id = $3::int))
+             RETURNING id`,
+            [item.entity_id, clientIds, payload.reassignedTo || null]
+          );
+          restoredClientCount = moved.rowCount;
+        }
+
+        // An admin who gets clients back must be able to serve them, so they are reactivated in that case.
         await db.query(
-          'UPDATE admin SET deleted_at = NULL, is_active = FALSE, updated_at = NOW() WHERE id = $1',
-          [item.entity_id]
+          'UPDATE admin SET deleted_at = NULL, is_active = $2, updated_at = NOW() WHERE id = $1',
+          [item.entity_id, restoredClientCount > 0]
         );
         teamAdminId = item.entity_id;
-        message = 'Admin restored as inactive. Reactivate them to restore access.';
+        restoredAdminEmail = payload.email || null;
+        message = restoredClientCount > 0
+          ? `Admin restored and reactivated with ${restoredClientCount} client(s) returned to them.`
+          : 'Admin restored as inactive. Reactivate them to restore access.';
+      } else if (isRegisterEntity(item.entity_type)) {
+        const restored = await restoreRegisterRow(db, item);
+        const owner = await db.query('SELECT admin_id FROM "user" WHERE id = $1', [restored.userId]);
+        teamAdminId = owner.rows[0]?.admin_id || null;
+        restoredUserId = restored.userId;
+        message = 'Record restored to the client\'s plan.';
       } else {
         throw Object.assign(new Error('unsupported'), { statusCode: 400 });
       }
       await db.query('UPDATE deleted_items SET restored_at = NOW() WHERE id = $1', [item.id]);
     });
 
+    const registerRestore = isRegisterEntity(item.entity_type);
     await logActivity({
       ...actorOf(req),
-      action: `${item.entity_type === 'user' ? 'client' : 'admin'}_restored`,
+      action: registerRestore ? 'plan_row_restored' : `${item.entity_type === 'user' ? 'client' : 'admin'}_restored`,
       targetType: item.entity_type,
       targetId: item.entity_id,
       teamAdminId,
-      meta: { deletedItemId: item.id },
+      meta: {
+        deletedItemId: item.id,
+        ...(item.entity_type === 'admin' ? { restoredClients: restoredClientCount } : {}),
+        ...(registerRestore ? { clientId: restoredUserId } : {}),
+      },
     });
 
-    res.json({ message });
+    if (item.entity_type === 'admin' && restoredAdminEmail) {
+      await notifyEmail(
+        restoredAdminEmail,
+        'Your LifeMap admin account was restored',
+        `A super admin restored your admin account${restoredClientCount > 0 ? ` and returned ${restoredClientCount} client(s) to you` : ''}.${restoredClientCount > 0 ? '' : ' It is inactive until a super admin reactivates it.'}\n\nIf this is unexpected, contact ${PRIVACY_CONTACT}.`
+      );
+    }
+
+    res.json({ message, restoredClients: item.entity_type === 'admin' ? restoredClientCount : undefined });
   } catch (error) {
     if (error.statusCode === 404) {
       return res.status(404).json({ error: 'The deleted record no longer exists' });
+    }
+    if (error.statusCode === 409) {
+      return res.status(409).json({ error: error.message });
+    }
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'This record already exists, so it cannot be restored again' });
     }
     if (error.statusCode === 400) {
       return res.status(400).json({ error: 'This item type cannot be restored' });
@@ -1501,14 +1668,19 @@ router.post('/deleted-items/:id/purge', authenticateSuperAdmin, [idParam('id')],
     );
     const item = itemRes.rows[0];
     if (!item) return res.status(404).json({ error: 'Deleted item not found' });
+    if (item.legal_hold) {
+      return res.status(409).json({ error: 'This item is under legal hold. Release the hold before purging it.' });
+    }
 
     if (item.entity_type === 'user') {
       await pool.query('DELETE FROM public."user" WHERE id = $1 AND deleted_at IS NOT NULL', [item.entity_id]);
+      await purgeRegisterItemsForUser(item.entity_id);
     } else if (item.entity_type === 'admin') {
       await pool.query('DELETE FROM admin WHERE id = $1 AND deleted_at IS NOT NULL', [item.entity_id]);
-    } else {
+    } else if (!isRegisterEntity(item.entity_type)) {
       return res.status(400).json({ error: 'This item type cannot be purged' });
     }
+    // register rows were already removed from the live table when they were deleted
     await pool.query('DELETE FROM deleted_items WHERE id = $1', [item.id]);
 
     await logActivity({
@@ -1522,6 +1694,37 @@ router.post('/deleted-items/:id/purge', authenticateSuperAdmin, [idParam('id')],
     res.json({ message: 'Permanently deleted' });
   } catch (error) {
     console.error('Error purging deleted item:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Legal hold: a held item is skipped by the 90-day purge and cannot be purged by hand until released.
+router.post('/deleted-items/:id/legal-hold', authenticateSuperAdmin, [
+  idParam('id'),
+  body('hold').isBoolean().withMessage('hold must be true or false'),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+    const hold = req.body.hold === true || req.body.hold === 'true';
+    const result = await pool.query(
+      `UPDATE deleted_items SET legal_hold = $2
+       WHERE id = $1 AND restored_at IS NULL
+       RETURNING id, entity_type, entity_id, legal_hold`,
+      [req.params.id, hold]
+    );
+    const item = result.rows[0];
+    if (!item) return res.status(404).json({ error: 'Deleted item not found' });
+
+    await logActivity({
+      ...actorOf(req),
+      action: hold ? 'legal_hold_set' : 'legal_hold_released',
+      targetType: item.entity_type,
+      targetId: item.entity_id,
+      meta: { deletedItemId: item.id },
+    });
+    res.json({ message: hold ? 'Legal hold set. This item will not be purged.' : 'Legal hold released.', item });
+  } catch (error) {
+    console.error('Error updating legal hold:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1556,9 +1759,14 @@ router.get('/privacy-requests', authenticateAdmin, async (req, res) => {
       `SELECT pr.id, pr.ref, pr.type, pr.status, pr.details, pr.notes, pr.due_at, pr.closed_at,
               pr.created_at, pr.updated_at,
               (pr.closed_at IS NULL AND pr.due_at IS NOT NULL AND pr.due_at < NOW()) AS overdue,
-              u.id AS user_id, u.email AS user_email, u.name AS user_name, u.admin_id
+              u.id AS user_id, u.email AS user_email, u.name AS user_name, u.admin_id,
+              COALESCE(ta.name, ta.username) AS team_label,
+              ta.username AS team_username,
+              (pr.closed_at IS NULL AND pr.due_at IS NOT NULL AND pr.due_at >= NOW()
+               AND pr.due_at <= NOW() + INTERVAL '14 days') AS due_soon
        FROM privacy_request pr
        JOIN "user" u ON u.id = pr.user_id
+       LEFT JOIN admin ta ON ta.id = u.admin_id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY (pr.closed_at IS NULL) DESC, pr.due_at ASC NULLS LAST, pr.created_at DESC`,
       params
@@ -1660,7 +1868,11 @@ router.get('/access-review', authenticateSuperAdmin, async (req, res) => {
       SELECT a.id, a.username, a.name, a.email, a.is_active, a.last_login_at, a.created_at,
              (a.locked_until IS NOT NULL AND a.locked_until > NOW()) AS locked,
              (a.last_login_at IS NULL OR a.last_login_at < NOW() - INTERVAL '90 days') AS dormant,
-             COUNT(u.id) FILTER (WHERE u.deleted_at IS NULL)::int AS client_count
+             COUNT(u.id) FILTER (WHERE u.deleted_at IS NULL)::int AS client_count,
+             (SELECT d.decision FROM access_review_decision d
+                WHERE d.admin_id = a.id ORDER BY d.created_at DESC, d.id DESC LIMIT 1) AS last_decision,
+             (SELECT d.created_at FROM access_review_decision d
+                WHERE d.admin_id = a.id ORDER BY d.created_at DESC, d.id DESC LIMIT 1) AS last_decision_at
       FROM admin a
       LEFT JOIN "user" u ON u.admin_id = a.id
       WHERE a.deleted_at IS NULL
@@ -1690,6 +1902,168 @@ router.get('/access-review', authenticateSuperAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error('Error building access review:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Record the outcome of a periodic access review for one admin.
+//   Keep       -> persisted + logged, nothing else changes
+//   Deactivate -> runs the normal deactivate flow (clients must be reassigned via reassignToAdminId), then persisted
+router.post('/access-review', authenticateSuperAdmin, [
+  body('adminId').isInt({ min: 1 }).withMessage('adminId is required').toInt(),
+  body('decision').custom((value) => {
+    if (['keep', 'deactivate'].includes(String(value || '').trim().toLowerCase())) return true;
+    throw new Error('decision must be Keep or Deactivate');
+  }),
+  body('reassignToAdminId').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  body('reason').optional({ values: 'falsy' }).isString(),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+    const adminId = req.body.adminId;
+    const decision = String(req.body.decision).trim().toLowerCase() === 'keep' ? 'Keep' : 'Deactivate';
+
+    const existing = await pool.query(
+      'SELECT id, username FROM admin WHERE id = $1 AND deleted_at IS NULL',
+      [adminId]
+    );
+    const admin = existing.rows[0];
+    if (!admin) return res.status(404).json({ error: 'Admin not found' });
+
+    let reassignedClients = 0;
+    let reassignedTo = null;
+    if (decision === 'Deactivate') {
+      const reason = req.body.reason ? String(req.body.reason).trim() : 'Access review: deactivated';
+      const outcome = await offboardAdmin({
+        req,
+        adminId,
+        reassignTo: req.body.reassignToAdminId,
+        mode: 'deactivate',
+        reason,
+      });
+      if (outcome.error) {
+        return res.status(outcome.status).json({ error: outcome.error, clientCount: outcome.clientCount });
+      }
+      reassignedClients = outcome.clientCount;
+      reassignedTo = outcome.reassignedTo;
+    }
+
+    const saved = await pool.query(
+      `INSERT INTO access_review_decision (admin_id, decision, decided_by)
+       VALUES ($1, $2, $3) RETURNING id, admin_id, decision, decided_by, created_at`,
+      [adminId, decision, req.admin.id]
+    );
+    await logActivity({
+      ...actorOf(req),
+      action: decision === 'Keep' ? 'access_review_keep' : 'access_review_deactivate',
+      targetType: 'admin',
+      targetId: adminId,
+      teamAdminId: adminId,
+      meta: { decision, reassignedClients, reassignedTo },
+    });
+
+    res.status(201).json({
+      message: decision === 'Keep' ? `Kept access for ${admin.username}` : `${admin.username} deactivated`,
+      decision: saved.rows[0],
+      reassignedClients,
+      reassignedTo,
+    });
+  } catch (error) {
+    console.error('Error recording access review decision:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== ASSOCIATE CHANGE ====================
+
+// One associate replaces another: move every client from -> to, deactivate and sign out `from`,
+// and send `to` an invite / reset link so they can set up their own credentials.
+router.post('/super-admin/associate-change', authenticateSuperAdmin, [
+  body('fromAdminId').isInt({ min: 1 }).withMessage('fromAdminId is required').toInt(),
+  body('toAdminId').isInt({ min: 1 }).withMessage('toAdminId is required').toInt(),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+    const { fromAdminId, toAdminId } = req.body;
+    if (Number(fromAdminId) === Number(toAdminId)) {
+      return res.status(400).json({ error: 'Choose two different admins' });
+    }
+
+    const toRes = await pool.query(
+      `SELECT id, username, name, email, last_login_at FROM admin
+       WHERE id = $1 AND is_active = TRUE AND deleted_at IS NULL`,
+      [toAdminId]
+    );
+    const toAdmin = toRes.rows[0];
+    if (!toAdmin) {
+      return res.status(400).json({ error: 'The incoming admin must be an active, non-deleted admin' });
+    }
+
+    const outcome = await offboardAdmin({
+      req,
+      adminId: fromAdminId,
+      reassignTo: toAdminId,
+      mode: 'deactivate',
+      reason: 'Associate change',
+    });
+    if (outcome.error) {
+      return res.status(outcome.status).json({ error: outcome.error, clientCount: outcome.clientCount });
+    }
+    // offboardAdmin already deactivated `from`, revoked its sessions and emailed both admins
+
+    let linkOutcome = { sent: false, reason: 'no_email' };
+    if (toAdmin.email) {
+      linkOutcome = await sendAccessLink('admin', toAdmin);
+    }
+
+    await logActivity({
+      ...actorOf(req),
+      action: 'associate_change',
+      targetType: 'admin',
+      targetId: toAdminId,
+      teamAdminId: toAdminId,
+      meta: {
+        fromAdminId,
+        toAdminId,
+        clientsMoved: outcome.clientCount,
+        accessLink: linkOutcome.purpose || null,
+        accessLinkSent: Boolean(linkOutcome.sent),
+      },
+    });
+
+    res.json({
+      message: `${outcome.clientCount} client(s) moved to ${toAdmin.username}; ${outcome.admin.username} was deactivated and signed out.`,
+      clientsMoved: outcome.clientCount,
+      fromAdminId,
+      toAdminId,
+      accessLinkSent: Boolean(linkOutcome.sent),
+    });
+  } catch (error) {
+    console.error('Error processing associate change:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================== PLAN VIEW (activity) ====================
+
+// Staff opened a client's plan. Clients log their own views via POST /api/activity/plan-view.
+router.post('/activity/plan-view', authenticateAdmin, [
+  body('clientId').isInt({ min: 1 }).withMessage('clientId is required').toInt(),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+    const client = await loadClientForAdmin(req, res, req.body.clientId);
+    if (!client) return;
+    const logged = await logPlanView({
+      actorRole: req.admin.role,
+      actorId: req.admin.id,
+      actorLabel: req.admin.username,
+      clientId: client.id,
+      teamAdminId: client.admin_id || null,
+    });
+    res.json({ logged });
+  } catch (error) {
+    console.error('Error logging plan view:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

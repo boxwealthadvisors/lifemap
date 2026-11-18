@@ -259,7 +259,7 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated, initialMode, defaultTab }
   const subheading = {
     signup: 'We will email you a 6-digit code to confirm your address.',
     forgot: 'Enter your email or username and we will email you a reset link.',
-    loginOtp: `Enter the 6-digit code we sent to ${challenge.challengeEmail || 'your email'}.`,
+    loginOtp: `Enter the 6-digit code we sent to ${challenge.challengeEmail || 'your email'}${challenge.role && challenge.role !== 'client' ? ', or the code from your authenticator app if you have set one up' : ''}.`,
   }[mode];
 
   const shownError = localError || error;
@@ -499,9 +499,23 @@ const AuthModal = ({ isOpen, onClose, onAuthenticated, initialMode, defaultTab }
             </div>
 
             <div style={{ fontSize: 13, color: 'var(--muted, #5b6b80)', lineHeight: 1.5 }}>
-              BOX Wealth collects your name, email and the plan details you enter only to run LifeMap
-              and keep your plan saved. We do not sell your data. You can ask us to correct it, withdraw
-              consent or raise a complaint at any time from Privacy &amp; Data in your account.
+              <p style={{ margin: '0 0 6px' }}>
+                <strong>What we collect:</strong> your name, email address, and the plan details you enter
+                (age, income, assets, goals, loans, expenses and insurance).
+              </p>
+              <p style={{ margin: '0 0 6px' }}>
+                <strong>Why:</strong> only to run LifeMap and keep your plan saved. We do not sell your data.
+              </p>
+              <p style={{ margin: '0 0 6px' }}>
+                <strong>Who at BOX can see it:</strong> your assigned relationship manager (if you have one),
+                BOX operations staff who support LifeMap, and BOX&apos;s privacy officer. Staff access to your
+                plan is logged.
+              </p>
+              <p style={{ margin: 0 }}>
+                You can ask us to correct your data, withdraw consent or raise a complaint at any time from
+                Privacy &amp; Data in your account. Read the full{' '}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="lm-tlink" style={{ textDecoration: 'underline' }}>Privacy Notice</a>.
+              </p>
             </div>
             <label
               htmlFor="signup-consent"

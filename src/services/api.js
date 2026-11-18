@@ -40,10 +40,11 @@ class ApiService {
     const adminToken = localStorage.getItem('adminToken');
     const userToken = localStorage.getItem('authToken');
     // For admin endpoints, prioritize admin token; for regular endpoints, use user token
-    const isAdminEndpoint = endpoint.includes('/admin/');
+    const path = endpoint.split('?')[0];
+    // /totp/* is the staff authenticator-app API (admin / super admin tokens only)
+    const isAdminEndpoint = endpoint.includes('/admin/') || path.startsWith('/totp/');
     // Public auth endpoints never carry a bearer token. The one exception is a "sensitive"
     // OTP request, which the backend only issues to the signed-in account's own email.
-    const path = endpoint.split('?')[0];
     const sensitiveOtp = path === '/otp' && options.body && typeof options.body === 'object'
       && options.body.purpose === 'sensitive';
     const isAuthEndpoint = AUTH_ENDPOINT_RE.test(path) && !sensitiveOtp;
@@ -197,6 +198,37 @@ class ApiService {
 
   async listPrivacyRequests() {
     return this.request('/privacy-requests');
+  }
+
+  // The signed-in client's own account activity
+  async getMyActivity({ limit = 50 } = {}) {
+    return this.request(`/activity-log${toQuery({ limit })}`);
+  }
+
+  // Fire-and-forget audit entry: someone opened a client's plan. Pass clientId when staff view a client.
+  async logPlanView({ clientId } = {}) {
+    if (clientId) {
+      return this.request('/admin/activity/plan-view', { method: 'POST', body: { clientId } });
+    }
+    return this.request('/activity/plan-view', { method: 'POST' });
+  }
+
+  // ==================== STAFF AUTHENTICATOR APP (TOTP) ====================
+
+  async getTotpStatus() {
+    return this.request('/totp/status');
+  }
+
+  async setupTotp() {
+    return this.request('/totp/setup', { method: 'POST' });
+  }
+
+  async enableTotp(code) {
+    return this.request('/totp/enable', { method: 'POST', body: { code } });
+  }
+
+  async disableTotp({ password, otp }) {
+    return this.request('/totp/disable', { method: 'POST', body: { password, otp } });
   }
 
   async createPrivacyRequest({ type, details }) {
@@ -717,6 +749,10 @@ class ApiService {
     return this.request(`/admin/deleted-items/${id}/purge`, { method: 'POST' });
   }
 
+  async setDeletedItemLegalHold(id, hold) {
+    return this.request(`/admin/deleted-items/${id}/legal-hold`, { method: 'POST', body: { hold } });
+  }
+
   async getPrivacyRequestsAdmin(status) {
     return this.request(`/admin/privacy-requests${toQuery({ status })}`);
   }
@@ -731,6 +767,22 @@ class ApiService {
 
   async getAccessReview() {
     return this.request('/admin/access-review');
+  }
+
+  // decision: 'Keep' | 'Deactivate' (Deactivate needs reassignToAdminId when the admin has clients)
+  async submitAccessReviewDecision({ adminId, decision, reassignToAdminId, reason } = {}) {
+    return this.request('/admin/access-review', {
+      method: 'POST',
+      body: { adminId, decision, reassignToAdminId: reassignToAdminId || undefined, reason: reason || undefined },
+    });
+  }
+
+  // Move all clients from one associate to another, deactivate the first and invite the second
+  async associateChange({ fromAdminId, toAdminId }) {
+    return this.request('/admin/super-admin/associate-change', {
+      method: 'POST',
+      body: { fromAdminId, toAdminId },
+    });
   }
 
   // Admin - User Management

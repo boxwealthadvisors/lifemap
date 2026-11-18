@@ -101,6 +101,13 @@ export default function MockupHost({ page, accountLabel, onNavigate, onExit }) {
     return job
   }, [effectiveUserId, displayName, isAdminMode])
 
+  // Audit trail: a signed-in client opened their plan. Staff views are logged by ClientPlanView
+  // (the server de-duplicates repeats, so page changes do not flood the log).
+  useEffect(() => {
+    if (isAdminMode || !isAuthenticated || !user?.id) return
+    ApiService.logPlanView().catch(() => { /* logging must never block the plan */ })
+  }, [isAdminMode, isAuthenticated, user?.id])
+
   useEffect(() => {
     hydrateGenRef.current += 1
     hydratedRef.current = false

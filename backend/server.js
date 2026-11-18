@@ -354,6 +354,15 @@ ensureLifemapMockupSchema(pool)
     console.error('[migrate] LifeMap mockup schema failed (server will still start):', error.message);
   })
   .finally(() => {
+    // Purge soft-deleted items past their 90-day window (skips legal holds) once a day, in addition to boot.
+    const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+    const purgeTimer = setInterval(() => {
+      purgeExpiredDeletedItems().catch((error) => {
+        console.error('[purge] scheduled purge failed:', error.message);
+      });
+    }, PURGE_INTERVAL_MS);
+    purgeTimer.unref?.();
+
     app.listen(PORT, () => {
       console.log(`🚀 Life Sheet Backend Server running on port ${PORT}`);
       console.log(`📊 Database: PostgreSQL (${process.env.DB_NAME || 'life_sheet'})`);

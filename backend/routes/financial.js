@@ -2,8 +2,97 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import pool from '../config/database.js';
 import { CORE_COLUMN_DEFINITIONS } from '../constants/columns.js';
+import { logActivity, softDeleteRegisterRow } from '../lib/security.js';
 
 const router = express.Router();
+
+// ---------- Activity log: plan_edit ----------
+// Every successful create / update / delete on a client's plan is logged, whether the client or their
+// advisor made it. Plural aliases are re-dispatched through this router, so we only hook a request once.
+const PLAN_EDIT_TARGETS = {
+  profile: 'profile',
+  goal: 'goal',
+  goals: 'goal',
+  expense: 'expense',
+  expenses: 'expense',
+  loan: 'loan',
+  loans: 'loan',
+  asset: 'asset',
+  assets: 'asset',
+  'work-asset': 'work_asset',
+  'work-assets': 'work_asset',
+  'planned-loan': 'planned_loan',
+  'planned-loans': 'planned_loan',
+  insurance: 'insurance',
+  insurances: 'insurance',
+};
+const PLAN_EDIT_OPS = { POST: 'create', PUT: 'update', PATCH: 'update', DELETE: 'delete' };
+
+const idFromResponse = (body) => {
+  if (!body || typeof body !== 'object') return null;
+  if (Number.isInteger(Number(body.id)) && body.id !== null) return Number(body.id);
+  for (const value of Object.values(body)) {
+    if (value && typeof value === 'object' && !Array.isArray(value) && value.id != null) {
+      const n = Number(value.id);
+      if (Number.isInteger(n)) return n;
+    }
+  }
+  return null;
+};
+
+const logPlanEdit = async ({ req, target, op, rowId }) => {
+  try {
+    const clientId = Number(req.user?.id);
+    if (!clientId) return;
+    const owner = await pool.query('SELECT admin_id FROM "user" WHERE id = $1', [clientId]);
+    const teamAdminId = owner.rows[0]?.admin_id || null;
+    const byStaff = Boolean(req.admin);
+    await logActivity({
+      actorRole: byStaff ? req.admin.role : 'client',
+      actorId: byStaff ? req.admin.id : clientId,
+      actorLabel: byStaff ? req.admin.username : (req.user.email || null),
+      action: 'plan_edit',
+      targetType: target,
+      targetId: rowId,
+      teamAdminId,
+      meta: { op, clientId, by: byStaff ? req.admin.role : 'client' },
+    });
+  } catch (error) {
+    console.error('plan_edit log failed', error.message);
+  }
+};
+
+router.use((req, res, next) => {
+  const op = PLAN_EDIT_OPS[req.method];
+  if (!op || req._planEditHooked) return next();
+  const match = req.path.match(/^\/([a-z-]+)(?:\/(\d+))?\/?$/);
+  const target = match ? PLAN_EDIT_TARGETS[match[1]] : null;
+  if (!target) return next();
+  req._planEditHooked = true;
+
+  let captured = null;
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    captured = body;
+    return originalJson(body);
+  };
+  res.on('finish', () => {
+    if (res.statusCode < 200 || res.statusCode >= 300) return;
+    const rowId = match[2] ? Number(match[2]) : idFromResponse(captured);
+    logPlanEdit({ req, target, op, rowId });
+  });
+  next();
+});
+
+// Soft delete: copy the row into deleted_items (restorable by a super admin for 90 days), then remove it
+// from the live table so the plan stays clean.
+const archiveRow = (req, table, id) => softDeleteRegisterRow({
+  table,
+  id,
+  deletedByRole: req.admin ? req.admin.role : 'client',
+  deletedById: req.admin ? req.admin.id : req.user.id,
+  reason: req.admin ? 'Deleted by staff from the client plan' : 'Deleted by client',
+});
 
 // Helper function to check if user has access (allows admin override)
 const checkUserAccess = (req, userId) => {
@@ -628,7 +717,7 @@ router.delete('/goal/:goalId', async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    await pool.query('DELETE FROM financial_goal WHERE id = $1', [goalId]);
+    await archiveRow(req, 'financial_goal', goalId);
 
     res.json({ message: 'Goal deleted successfully' });
   } catch (error) {
@@ -876,8 +965,8 @@ router.delete('/expense/:expenseId', async (req, res) => {
 
     const loanId = expenseCheck.rows[0].loan_id;
 
-    // Delete the expense
-    await pool.query('DELETE FROM financial_expense WHERE id = $1', [expenseId]);
+    // Delete the expense (soft delete: archived for 90 days)
+    await archiveRow(req, 'financial_expense', expenseId);
 
     // If this expense was linked to a loan, delete the associated loan as well
     if (loanId) {
@@ -891,8 +980,8 @@ router.delete('/expense/:expenseId', async (req, res) => {
         );
 
         if (loanCheck.rows.length > 0 && loanCheck.rows[0].user_id === req.user.id) {
-          // Delete the loan (CASCADE will handle any other expenses linked to it)
-          await pool.query('DELETE FROM financial_loan WHERE id = $1', [loanId]);
+          // Delete the loan (soft delete; any other expenses linked to it are archived with it)
+          await archiveRow(req, 'financial_loan', loanId);
           console.log(`✅ Deleted associated loan ${loanId}`);
         } else {
           console.log(`⚠️ Loan ${loanId} not found or access denied, skipping loan deletion`);
@@ -1352,13 +1441,10 @@ router.delete('/loan/:loanId', async (req, res) => {
     }
 
     console.log('✅ Proceeding with deletion of loan ID:', loanId);
-    
-    // Delete associated expense (CASCADE should handle this, but explicit deletion for clarity)
-    const expenseDeleteResult = await pool.query('DELETE FROM financial_expense WHERE loan_id = $1', [loanId]);
-    console.log(`✅ Deleted ${expenseDeleteResult.rowCount} expense(s) for loan ${loanId}`);
-    
-    const result = await pool.query('DELETE FROM financial_loan WHERE id = $1 RETURNING id', [loanId]);
-    console.log('✅ Loan deleted successfully:', result.rows[0]);
+
+    // Soft delete: the loan and its linked expenses are archived together, then removed from the live tables
+    await archiveRow(req, 'financial_loan', loanId);
+    console.log('✅ Loan deleted successfully:', loanId);
 
     res.json({ message: 'Loan deleted successfully' });
   } catch (error) {
@@ -1450,10 +1536,8 @@ router.delete('/loans/:loanId', async (req, res) => {
     }
 
     console.log('✅ Proceeding with deletion of loan ID:', loanId);
-    const expenseDeleteResult = await pool.query('DELETE FROM financial_expense WHERE loan_id = $1', [loanId]);
-    console.log(`✅ Deleted ${expenseDeleteResult.rowCount} expense(s) for loan ${loanId}`);
-    const result = await pool.query('DELETE FROM financial_loan WHERE id = $1 RETURNING id', [loanId]);
-    console.log('✅ Loan deleted successfully:', result.rows[0]);
+    await archiveRow(req, 'financial_loan', loanId);
+    console.log('✅ Loan deleted successfully:', loanId);
 
     res.json({ message: 'Loan deleted successfully' });
   } catch (error) {
@@ -1700,7 +1784,7 @@ router.delete('/asset/:assetId', async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const result = await pool.query('DELETE FROM assets WHERE id = $1 RETURNING id', [assetId]);
+    await archiveRow(req, 'assets', assetId);
 
     res.json({ message: 'Asset deleted successfully' });
   } catch (error) {
@@ -2318,7 +2402,7 @@ router.delete('/work-asset/:assetId', async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
     
-    await pool.query('DELETE FROM work_assets WHERE id = $1', [assetId]);
+    await archiveRow(req, 'work_assets', assetId);
     
     res.json({ message: 'Work asset deleted successfully' });
   } catch (error) {
@@ -2413,7 +2497,7 @@ router.delete('/planned-loan/:loanId', async (req, res) => {
     const ownership = await pool.query('SELECT user_id FROM planned_loan WHERE id = $1', [loanId]);
     if (ownership.rows.length === 0) return res.status(404).json({ error: 'Planned loan not found' });
     if (ownership.rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
-    await pool.query('DELETE FROM planned_loan WHERE id = $1', [loanId]);
+    await archiveRow(req, 'planned_loan', loanId);
     res.json({ message: 'Planned loan deleted successfully' });
   } catch (error) {
     console.error('Planned loan delete error:', error);
@@ -2701,16 +2785,8 @@ router.delete('/insurance/:insuranceId', async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Delete associated expense (if exists)
-    try {
-      const expenseDeleteResult = await pool.query('DELETE FROM financial_expense WHERE insurance_id = $1', [insuranceId]);
-      console.log(`✅ Deleted ${expenseDeleteResult.rowCount} expense(s) for insurance ${insuranceId}`);
-    } catch (expenseError) {
-      console.error('Error deleting expense for insurance:', expenseError);
-      // Continue with insurance deletion even if expense deletion fails
-    }
-
-    await pool.query('DELETE FROM financial_insurance WHERE id = $1', [insuranceId]);
+    // Soft delete: the policy and its linked premium expense(s) are archived together, then removed
+    await archiveRow(req, 'financial_insurance', insuranceId);
     res.json({ message: 'Insurance deleted successfully' });
   } catch (error) {
     console.error('Insurance deletion error:', error);

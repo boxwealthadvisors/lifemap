@@ -14,6 +14,7 @@ export function passwordProblem(value) {
 }
 
 export const PRIVACY_CONTACT_FALLBACK = 'privacy@boxwealth.in';
+export const PRIVACY_CONTACT_NAME_FALLBACK = 'BOX Wealth Privacy Officer';
 export const PRIVACY_NOTICE_VERSION_FALLBACK = 'v1.0-2026-11-16';
 
 export function formatDate(value) {

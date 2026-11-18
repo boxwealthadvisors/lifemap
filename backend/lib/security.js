@@ -5,6 +5,7 @@ import { sendMail } from './mailer.js'
 export const PRIVACY_NOTICE_VERSION = 'v1.0-2026-11-16'
 export const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.CORS_ORIGIN?.split(',')[0]?.trim() || 'https://lifemap.finance').replace(/\/$/, '')
 export const PRIVACY_CONTACT = process.env.PRIVACY_CONTACT || 'privacy@boxwealth.in'
+export const PRIVACY_CONTACT_NAME = process.env.PRIVACY_CONTACT_NAME || 'BOX Wealth Privacy Officer'
 export const LOCKOUT_MS = 15 * 60 * 1000
 export const MAX_FAILED_ATTEMPTS = 5
 export const OTP_TTL_MS = 10 * 60 * 1000
@@ -161,7 +162,16 @@ export async function issueOtp(email, purpose) {
   return { email: normalized, code }
 }
 
-export async function consumeOtp(email, purpose, code) {
+const LOCKED_OTP_ERROR = `Too many incorrect codes. This account is locked for ${Math.round(LOCKOUT_MS / 60000)} minutes.`
+
+/**
+ * Verify and consume an emailed one-time code.
+ *
+ * `account` is optional: `{ role, subjectId, tableSql, actorLabel?, teamAdminId?, ip? }`. When given, every wrong
+ * code is recorded against that account (registerFailure + a `failed_login` activity entry) and, once the code's
+ * attempts reach MAX_FAILED_ATTEMPTS (or the account lock trips), the call returns `{ locked: true, status: 429 }`.
+ */
+export async function consumeOtp(email, purpose, code, account = null) {
   const normalized = normalizeEmail(email)
   const clean = String(code || '').replace(/\s+/g, '')
   if (!/^\d{6}$/.test(clean)) {
@@ -183,7 +193,37 @@ export async function consumeOtp(email, purpose, code) {
     return { error: 'Too many incorrect codes. Request a new one.', status: 400 }
   }
   if (!otpMatches(normalized, clean, row.code_hash)) {
-    await pool.query('UPDATE email_otp SET attempts = attempts + 1 WHERE id = $1', [row.id])
+    const bumped = await pool.query(
+      'UPDATE email_otp SET attempts = attempts + 1 WHERE id = $1 RETURNING attempts',
+      [row.id]
+    )
+    const attempts = bumped.rows[0]?.attempts ?? (row.attempts || 0) + 1
+
+    if (account?.role && account?.subjectId && account?.tableSql) {
+      const failure = await registerFailure(account.tableSql, account.subjectId)
+      await logActivity({
+        actorRole: account.role,
+        actorId: account.subjectId,
+        actorLabel: account.actorLabel || null,
+        action: 'failed_login',
+        targetType: account.role === 'client' ? 'user' : account.role,
+        targetId: account.subjectId,
+        teamAdminId: account.teamAdminId || null,
+        meta: { stage: 'otp', purpose, attempts, ip: account.ip || null },
+      })
+      if (attempts >= MAX_FAILED_ATTEMPTS || (failure && isLocked(failure))) {
+        // Make sure the account itself is locked, not just this code burned.
+        if (!(failure && isLocked(failure))) {
+          await pool.query(
+            `UPDATE ${account.tableSql}
+             SET locked_until = NOW() + ($2 || ' milliseconds')::interval, updated_at = NOW()
+             WHERE id = $1`,
+            [account.subjectId, String(LOCKOUT_MS)]
+          )
+        }
+        return { error: LOCKED_OTP_ERROR, status: 429, locked: true, failedAttempts: failure?.failed_attempts }
+      }
+    }
     return { error: 'That code is incorrect', status: 400 }
   }
   await pool.query('UPDATE email_otp SET consumed_at = NOW() WHERE id = $1', [row.id])
@@ -282,18 +322,125 @@ export async function softDeleteEntity({
   return result.rows[0]
 }
 
+// ---- soft-deleted plan register rows (goals, expenses, loans, assets, ...) ----
+// entity_type is the live table name. The row is copied (as JSON computed by Postgres) into deleted_items
+// and then removed from the live table so the UI stays clean; restore re-inserts it from the payload.
+
+export const REGISTER_TABLES = [
+  'financial_goal',
+  'financial_expense',
+  'financial_loan',
+  'assets',
+  'work_assets',
+  'planned_loan',
+  'financial_insurance',
+]
+
+export const isRegisterEntity = (entityType) => REGISTER_TABLES.includes(entityType)
+
+// Child rows removed together with their parent (and put back with it on restore)
+const LINKED_EXPENSE_COLUMN = {
+  financial_loan: 'loan_id',
+  financial_insurance: 'insurance_id',
+}
+
+/**
+ * Archive one register row into deleted_items, then delete it from the live table.
+ * The caller must already have checked ownership. Returns the deleted_items row, or null when the row is gone.
+ */
+export async function softDeleteRegisterRow({ table, id, deletedByRole, deletedById, reason = null }) {
+  if (!isRegisterEntity(table)) throw new Error(`softDeleteRegisterRow: unsupported table ${table}`)
+  const snapshot = await pool.query(`SELECT to_jsonb(t) AS row FROM ${table} t WHERE id = $1`, [id])
+  const row = snapshot.rows[0]?.row
+  if (!row) return null
+
+  const payload = { ...row }
+  const linkedColumn = LINKED_EXPENSE_COLUMN[table]
+  if (linkedColumn) {
+    const linked = await pool.query(
+      `SELECT to_jsonb(e) AS row FROM financial_expense e WHERE e.${linkedColumn} = $1`,
+      [id]
+    )
+    payload._linkedExpenses = linked.rows.map((r) => r.row)
+  }
+
+  const item = await softDeleteEntity({
+    entityType: table,
+    entityId: Number(id),
+    payload,
+    deletedByRole,
+    deletedById,
+    reason,
+  })
+
+  if (linkedColumn) {
+    await pool.query(`DELETE FROM financial_expense WHERE ${linkedColumn} = $1`, [id])
+  }
+  await pool.query(`DELETE FROM ${table} WHERE id = $1`, [id])
+  return item
+}
+
+async function insertRegisterJson(db, table, json) {
+  const clean = { ...json }
+  delete clean._linkedExpenses
+  // Drop references that no longer resolve instead of failing the whole restore
+  const refs = [
+    ['profile_id', 'financial_profile'],
+    ['loan_id', 'financial_loan'],
+    ['insurance_id', 'financial_insurance'],
+  ]
+  for (const [column, parent] of refs) {
+    if (clean[column] !== undefined && clean[column] !== null) {
+      const found = await db.query(`SELECT 1 FROM ${parent} WHERE id = $1`, [clean[column]])
+      if (!found.rows[0]) clean[column] = null
+    }
+  }
+  await db.query(
+    `INSERT INTO ${table} SELECT * FROM jsonb_populate_record(NULL::${table}, $1::jsonb)`,
+    [JSON.stringify(clean)]
+  )
+}
+
+/**
+ * Put a soft-deleted register row (and its linked expenses) back. `db` is a pg client or the pool.
+ * Throws an Error with `statusCode` 404/409 when it cannot be restored.
+ */
+export async function restoreRegisterRow(db, item) {
+  const table = item.entity_type
+  if (!isRegisterEntity(table)) throw Object.assign(new Error('unsupported'), { statusCode: 400 })
+  const payload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload
+  const owner = await db.query('SELECT id FROM "user" WHERE id = $1 AND deleted_at IS NULL', [payload.user_id])
+  if (!owner.rows[0]) {
+    throw Object.assign(new Error('The client who owned this record no longer exists or is deleted. Restore the client first.'), { statusCode: 409 })
+  }
+  const exists = await db.query(`SELECT 1 FROM ${table} WHERE id = $1`, [payload.id])
+  if (exists.rows[0]) {
+    throw Object.assign(new Error('A record with this id already exists'), { statusCode: 409 })
+  }
+  await insertRegisterJson(db, table, payload)
+  for (const expense of payload._linkedExpenses || []) {
+    const dup = await db.query('SELECT 1 FROM financial_expense WHERE id = $1', [expense.id])
+    if (!dup.rows[0]) await insertRegisterJson(db, 'financial_expense', expense)
+  }
+  return { table, id: payload.id, userId: payload.user_id }
+}
+
 export async function purgeExpiredDeletedItems() {
   try {
+    // Items under legal hold are never purged automatically
     const result = await pool.query(
       `SELECT id, entity_type, entity_id FROM deleted_items
-       WHERE restored_at IS NULL AND purge_after IS NOT NULL AND purge_after < NOW()`
+       WHERE restored_at IS NULL AND purge_after IS NOT NULL AND purge_after < NOW()
+         AND COALESCE(legal_hold, FALSE) = FALSE`
     )
     for (const row of result.rows) {
       if (row.entity_type === 'user') {
         await pool.query('DELETE FROM public."user" WHERE id = $1 AND deleted_at IS NOT NULL', [row.entity_id])
+        await purgeRegisterItemsForUser(row.entity_id)
       } else if (row.entity_type === 'admin') {
         await pool.query('DELETE FROM admin WHERE id = $1 AND deleted_at IS NOT NULL', [row.entity_id])
       }
+      // register rows were already removed from the live table at delete time
       await logActivity({
         action: 'permanent_purge',
         targetType: row.entity_type,
@@ -304,6 +451,44 @@ export async function purgeExpiredDeletedItems() {
     }
   } catch (error) {
     console.error('purgeExpiredDeletedItems failed', error.message)
+  }
+}
+
+// When a client is permanently removed, their archived plan rows go with them (unless on legal hold).
+export async function purgeRegisterItemsForUser(userId) {
+  await pool.query(
+    `DELETE FROM deleted_items
+     WHERE entity_type = ANY($1::text[])
+       AND payload->>'user_id' = $2
+       AND COALESCE(legal_hold, FALSE) = FALSE`,
+    [REGISTER_TABLES, String(userId)]
+  )
+}
+
+// plan_view: someone opened a client's plan. De-duplicated so page changes do not flood the log.
+export async function logPlanView({ actorRole, actorId, actorLabel, clientId, teamAdminId = null }) {
+  try {
+    const recent = await pool.query(
+      `SELECT 1 FROM activity_log
+       WHERE action = 'plan_view' AND actor_role = $1 AND actor_id = $2 AND target_id = $3
+         AND created_at > NOW() - INTERVAL '10 minutes'
+       LIMIT 1`,
+      [actorRole, actorId, clientId]
+    )
+    if (recent.rows[0]) return false
+    await logActivity({
+      actorRole,
+      actorId,
+      actorLabel,
+      action: 'plan_view',
+      targetType: 'user',
+      targetId: clientId,
+      teamAdminId,
+    })
+    return true
+  } catch (error) {
+    console.error('logPlanView failed', error.message)
+    return false
   }
 }
 

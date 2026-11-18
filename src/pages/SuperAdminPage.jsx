@@ -192,7 +192,8 @@ export default function SuperAdminPage() {
 
   const handleTransferClient = async (reason) => {
     try {
-      await ApiService.transferUser(transfer.id, transferTo === 'none' ? null : parseInt(transferTo, 10), reason);
+      // A client must always go to an active admin; there is no "unassigned" target.
+      await ApiService.transferUser(transfer.id, parseInt(transferTo, 10), reason);
       toast.success('Client transferred');
       setTransfer(null);
       setTransferTo('');
@@ -220,9 +221,7 @@ export default function SuperAdminPage() {
 
   const activeAdmins = admins.filter((a) => a.is_active);
   const receivers = offboard ? activeAdmins.filter((a) => a.id !== offboard.admin.id) : [];
-  const transferTarget = transferTo === 'none'
-    ? 'Unassigned'
-    : activeAdmins.find((a) => String(a.id) === String(transferTo))?.username;
+  const transferTarget = activeAdmins.find((a) => String(a.id) === String(transferTo))?.username;
 
   const adminFormFields = (
     <>
@@ -382,7 +381,9 @@ export default function SuperAdminPage() {
                     <td>{u.last_login_at ? formatDateTime(u.last_login_at) : 'Never'}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        <button type="button" className="lm-ghost" onClick={() => { setTransferTo(''); setTransfer(u); }}>Transfer</button>
+                        <button type="button" className="lm-ghost" onClick={() => { setTransferTo(''); setTransfer(u); }}>
+                          {u.admin_id ? 'Transfer' : 'Assign'}
+                        </button>
                         <button type="button" className="lm-iconbtn danger" aria-label="Delete client" onClick={() => setDeleteClient(u)}>
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -485,8 +486,8 @@ export default function SuperAdminPage() {
 
       {transfer ? (
         <TextPromptModal
-          title="Transfer client"
-          description={`Move ${transfer.name || transfer.email} from ${transfer.admin_username || 'Unassigned'}${transferTarget ? ` to ${transferTarget}` : ''}. Both advisors are emailed with your reason.`}
+          title={transfer.admin_username ? 'Transfer client' : 'Assign client to an admin'}
+          description={`Move ${transfer.name || transfer.email} from ${transfer.admin_username || 'Unassigned'}${transferTarget ? ` to ${transferTarget}` : ''}. The advisors involved are emailed with your reason.`}
           label="Reason for transfer"
           placeholder="For example: advisor on leave"
           confirmLabel="Confirm transfer"
@@ -497,8 +498,7 @@ export default function SuperAdminPage() {
           <div>
             <label htmlFor="xfer-admin">Move to *</label>
             <select id="xfer-admin" className="lm-inp" value={transferTo} onChange={(e) => setTransferTo(e.target.value)}>
-              <option value="" disabled>Select admin</option>
-              <option value="none">Unassigned</option>
+              <option value="" disabled>Select an active admin</option>
               {activeAdmins.filter((a) => a.id !== transfer.admin_id).map((a) => (
                 <option key={a.id} value={a.id}>{a.username}{a.name ? ` (${a.name})` : ''}</option>
               ))}

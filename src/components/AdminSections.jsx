@@ -120,9 +120,28 @@ function compactMeta(meta) {
 
 const PAGE_SIZE = 50;
 
+const ACTIVITY_ACTIONS = [
+  'login', 'failed_login', 'account_locked', 'client_signup',
+  'password_reset_requested', 'password_reset', 'password_changed', 'invite_accepted',
+  'sessions_revoked_all', 'profile_email_changed',
+  'totp_enabled', 'totp_disabled',
+  'plan_view', 'plan_edit', 'plan_row_restored',
+  'client_created', 'client_updated', 'client_deleted', 'client_restored',
+  'client_transferred', 'client_transferred_out', 'client_reset_link_sent',
+  'admin_created', 'admin_updated', 'admin_deactivated', 'admin_deleted', 'admin_restored',
+  'admin_reset_link_sent', 'admin_username_changed', 'admin_email_changed', 'admin_password_changed',
+  'super_admin_username_changed', 'super_admin_email_changed', 'super_admin_password_changed',
+  'clients_reassigned_in', 'associate_change',
+  'privacy_request_created', 'privacy_request_updated',
+  'access_review_viewed', 'access_review_keep', 'access_review_deactivate',
+  'legal_hold_set', 'legal_hold_released', 'permanent_purge', 'activity_log_exported',
+];
+
+const EMPTY_FILTERS = { q: '', action: '', from: '', to: '', team: '', clientId: '', userId: '' };
+
 // Activity log. Super admin sees everything (and can filter by team); an admin sees their own team.
 export function ActivityLogSection({ isSuper = false, admins = [] }) {
-  const [filters, setFilters] = useState({ q: '', action: '', from: '', to: '', team: '' });
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [applied, setApplied] = useState({});
   const [offset, setOffset] = useState(0);
   const [entries, setEntries] = useState([]);
@@ -152,8 +171,7 @@ export function ActivityLogSection({ isSuper = false, admins = [] }) {
   };
 
   const clearFilters = () => {
-    const empty = { q: '', action: '', from: '', to: '', team: '' };
-    setFilters(empty);
+    setFilters(EMPTY_FILTERS);
     setOffset(0);
     setApplied({});
   };
@@ -193,11 +211,35 @@ export function ActivityLogSection({ isSuper = false, admins = [] }) {
           onChange={(e) => setFilters({ ...filters, q: e.target.value })}
           style={{ minWidth: 220 }}
         />
-        <input
+        <select
           className="lm-inp"
-          placeholder="Action (e.g. login)"
+          aria-label="Action"
           value={filters.action}
           onChange={(e) => setFilters({ ...filters, action: e.target.value })}
+        >
+          <option value="">All actions</option>
+          {ACTIVITY_ACTIONS.map((a) => (
+            <option key={a} value={a}>{actionLabel(a)}</option>
+          ))}
+        </select>
+        <input
+          className="lm-inp"
+          inputMode="numeric"
+          placeholder="Client ID"
+          aria-label="Client ID"
+          value={filters.clientId}
+          onChange={(e) => setFilters({ ...filters, clientId: e.target.value.replace(/\D/g, '') })}
+          style={{ width: 100 }}
+        />
+        <input
+          className="lm-inp"
+          inputMode="numeric"
+          placeholder="Actor ID"
+          aria-label="Actor (user) ID"
+          title="Id of the person who performed the action"
+          value={filters.userId}
+          onChange={(e) => setFilters({ ...filters, userId: e.target.value.replace(/\D/g, '') })}
+          style={{ width: 100 }}
         />
         <input
           className="lm-inp"
@@ -284,6 +326,19 @@ function privacyTone(status) {
   return 'warn';
 }
 
+const DUE_SOON_DAYS = 14;
+
+// Open request due within the next 14 days (and not already overdue)
+function isDueSoon(request) {
+  if (request.closed_at || request.overdue || !request.due_at) return false;
+  const status = String(request.status || '').toLowerCase();
+  if (status === 'closed' || status === 'rejected' || status === 'completed') return false;
+  const due = new Date(request.due_at).getTime();
+  if (Number.isNaN(due)) return false;
+  const msLeft = due - Date.now();
+  return msLeft >= 0 && msLeft <= DUE_SOON_DAYS * 24 * 60 * 60 * 1000;
+}
+
 // Privacy requests raised by clients. Super admin sees all; an admin sees their own clients'.
 export function PrivacyRequestsAdminSection() {
   const [requests, setRequests] = useState([]);
@@ -356,6 +411,7 @@ export function PrivacyRequestsAdminSection() {
             <tr>
               <th>Reference</th>
               <th>Client</th>
+              <th>Team</th>
               <th>Type</th>
               <th>Details</th>
               <th>Due</th>
@@ -365,13 +421,14 @@ export function PrivacyRequestsAdminSection() {
           </thead>
           <tbody>
             {loading && requests.length === 0 ? (
-              <tr><td className="empty" colSpan={7}>Loading…</td></tr>
+              <tr><td className="empty" colSpan={8}>Loading…</td></tr>
             ) : requests.length === 0 ? (
-              <tr><td className="empty" colSpan={7}>No privacy requests</td></tr>
+              <tr><td className="empty" colSpan={8}>No privacy requests</td></tr>
             ) : requests.map((r) => (
               <tr key={r.id}>
                 <td>{r.ref}<div style={{ fontSize: 11.5, color: 'var(--lm-slate)' }}>{formatDate(r.created_at)}</div></td>
                 <td>{r.user_name || '—'}<div style={{ fontSize: 11.5, color: 'var(--lm-slate)' }}>{r.user_email}</div></td>
+                <td>{r.team_label || 'Unassigned'}</td>
                 <td>{PRIVACY_TYPE_LABEL[r.type] || r.type}</td>
                 <td style={{ maxWidth: 280, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {r.details || '—'}
@@ -380,6 +437,7 @@ export function PrivacyRequestsAdminSection() {
                 <td>
                   {r.closed_at ? `Closed ${formatDate(r.closed_at)}` : formatDate(r.due_at)}
                   {r.overdue ? <div><span className="lm-badge off">Overdue</span></div> : null}
+                  {isDueSoon(r) ? <div><span className="lm-badge warn">Due soon</span></div> : null}
                 </td>
                 <td>
                   <select
@@ -417,6 +475,18 @@ export function PrivacyRequestsAdminSection() {
   );
 }
 
+const DELETED_TYPE_LABEL = {
+  user: 'Client',
+  admin: 'Admin',
+  financial_goal: 'Goal',
+  financial_expense: 'Expense',
+  financial_loan: 'Loan',
+  assets: 'Asset',
+  work_assets: 'Work asset',
+  planned_loan: 'Planned loan',
+  financial_insurance: 'Insurance',
+};
+
 // Recycle bin (super admin): restore within 90 days or purge permanently
 export function DeletedItemsSection({ onChanged }) {
   const [items, setItems] = useState([]);
@@ -452,6 +522,19 @@ export function DeletedItemsSection({ onChanged }) {
     }
   };
 
+  const toggleHold = async (item) => {
+    try {
+      setBusyId(item.id);
+      const res = await ApiService.setDeletedItemLegalHold(item.id, !item.legal_hold);
+      toast.success(res?.message || (item.legal_hold ? 'Legal hold released' : 'Legal hold set'));
+      await load();
+    } catch (error) {
+      toast.error(error.message || 'Could not update the legal hold');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const purge = async () => {
     const item = purgeTarget;
     try {
@@ -472,7 +555,8 @@ export function DeletedItemsSection({ onChanged }) {
         <span className="count">{items.length} items</span>
       </div>
       <p className="lm-hint" style={{ padding: '0 16px 8px', margin: 0 }}>
-        Deleted clients and admins can be restored until their purge date (90 days), then are removed permanently.
+        Deleted clients, admins and plan entries (goals, expenses, loans, assets, insurance...) can be restored until
+        their purge date (90 days), then are removed permanently. Items under legal hold are never purged automatically.
       </p>
       <div className="lm-tblwrap">
         <table className="lm-tbl">
@@ -494,16 +578,34 @@ export function DeletedItemsSection({ onChanged }) {
               <tr><td className="empty" colSpan={7}>Nothing has been deleted</td></tr>
             ) : items.map((item) => (
               <tr key={item.id}>
-                <td>{item.entity_type === 'user' ? 'Client' : 'Admin'}</td>
-                <td>{item.label || '—'}</td>
+                <td>{DELETED_TYPE_LABEL[item.entity_type] || item.entity_type}</td>
+                <td>
+                  {item.label || '—'}
+                  {item.client_name ? <div style={{ fontSize: 11.5, color: 'var(--lm-slate)' }}>Client: {item.client_name}</div> : null}
+                </td>
                 <td>{item.email || '—'}</td>
                 <td style={{ maxWidth: 260, wordBreak: 'break-word' }}>{item.reason || '—'}</td>
                 <td>{formatDate(item.deleted_at)}<div style={{ fontSize: 11.5, color: 'var(--lm-slate)' }}>{item.deleted_by_role}</div></td>
-                <td>{formatDate(item.purge_after)}</td>
+                <td>
+                  {formatDate(item.purge_after)}
+                  {item.legal_hold ? <div><span className="lm-badge warn">Legal hold</span></div> : null}
+                </td>
                 <td>
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                     <button type="button" className="lm-ghost" disabled={busyId === item.id} onClick={() => restore(item)}>Restore</button>
-                    <button type="button" className="lm-ghost" onClick={() => setPurgeTarget(item)} style={{ color: '#b42318' }}>Purge</button>
+                    <button type="button" className="lm-ghost" disabled={busyId === item.id} onClick={() => toggleHold(item)}>
+                      {item.legal_hold ? 'Release hold' : 'Legal hold'}
+                    </button>
+                    <button
+                      type="button"
+                      className="lm-ghost"
+                      disabled={Boolean(item.legal_hold)}
+                      title={item.legal_hold ? 'Release the legal hold first' : undefined}
+                      onClick={() => setPurgeTarget(item)}
+                      style={item.legal_hold ? undefined : { color: '#b42318' }}
+                    >
+                      Purge
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -537,9 +639,11 @@ export function DeletedItemsSection({ onChanged }) {
 export function AccessReviewSection({ onChanged }) {
   const [review, setReview] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [kept, setKept] = useState({});
   const [deactivating, setDeactivating] = useState(null);
   const [reassignTo, setReassignTo] = useState('');
+  const [keepingId, setKeepingId] = useState(null);
+  const [associate, setAssociate] = useState(null); // { fromAdminId, toAdminId } while the modal is open
+  const [associateBusy, setAssociateBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -558,10 +662,38 @@ export function AccessReviewSection({ onChanged }) {
     () => (review?.admins || []).filter((a) => a.is_active && a.id !== deactivating?.id),
     [review, deactivating]
   );
+  const activeAdmins = useMemo(() => (review?.admins || []).filter((a) => a.is_active), [review]);
 
-  const keep = (admin) => {
-    setKept((prev) => ({ ...prev, [admin.id]: new Date().toISOString() }));
-    toast.success(`Kept access for ${admin.username}`);
+  // "Keep" is recorded on the server (access_review_decision) and in the activity log
+  const keep = async (admin) => {
+    try {
+      setKeepingId(admin.id);
+      await ApiService.submitAccessReviewDecision({ adminId: admin.id, decision: 'Keep' });
+      toast.success(`Kept access for ${admin.username}`);
+      await load();
+    } catch (error) {
+      toast.error(error.message || 'Could not record the decision');
+    } finally {
+      setKeepingId(null);
+    }
+  };
+
+  const confirmAssociateChange = async () => {
+    try {
+      setAssociateBusy(true);
+      const res = await ApiService.associateChange({
+        fromAdminId: Number(associate.fromAdminId),
+        toAdminId: Number(associate.toAdminId),
+      });
+      toast.success(res?.message || 'Associate change complete');
+      setAssociate(null);
+      await load();
+      onChanged?.();
+    } catch (error) {
+      toast.error(error.message || 'Could not complete the associate change');
+    } finally {
+      setAssociateBusy(false);
+    }
   };
 
   const confirmDeactivate = async (reason) => {
@@ -570,7 +702,9 @@ export function AccessReviewSection({ onChanged }) {
       return;
     }
     try {
-      await ApiService.deactivateAdmin(deactivating.id, {
+      await ApiService.submitAccessReviewDecision({
+        adminId: deactivating.id,
+        decision: 'Deactivate',
         reassignToAdminId: reassignTo ? Number(reassignTo) : undefined,
         reason,
       });
@@ -598,6 +732,15 @@ export function AccessReviewSection({ onChanged }) {
             {admins.length} admins · {review?.unassignedClients ?? 0} unassigned clients
           </span>
           <div className="r">
+            <button
+              type="button"
+              className="lm-ghost primary"
+              onClick={() => setAssociate({ fromAdminId: '', toAdminId: '' })}
+              disabled={activeAdmins.length < 2}
+              title={activeAdmins.length < 2 ? 'Needs at least two active admins' : undefined}
+            >
+              Associate change
+            </button>
             <button type="button" className="lm-ghost" onClick={load} disabled={loading}>Refresh</button>
           </div>
         </div>
@@ -632,11 +775,15 @@ export function AccessReviewSection({ onChanged }) {
                     <span className={`lm-badge ${a.is_active ? 'on' : 'off'}`}>{a.is_active ? 'Active' : 'Inactive'}</span>
                     {a.dormant ? <span className="lm-badge warn" style={{ marginLeft: 4 }}>Dormant</span> : null}
                     {a.locked ? <span className="lm-badge off" style={{ marginLeft: 4 }}>Locked</span> : null}
-                    {kept[a.id] ? <span className="lm-badge on" style={{ marginLeft: 4 }}>Reviewed</span> : null}
+                    {a.last_decision === 'Keep' ? (
+                      <span className="lm-badge on" style={{ marginLeft: 4 }} title={a.last_decision_at ? `Reviewed ${formatDateTime(a.last_decision_at)}` : undefined}>Reviewed</span>
+                    ) : null}
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                      <button type="button" className="lm-ghost" onClick={() => keep(a)}>Keep</button>
+                      <button type="button" className="lm-ghost" disabled={keepingId === a.id} onClick={() => keep(a)}>
+                        {keepingId === a.id ? 'Saving…' : 'Keep'}
+                      </button>
                       <button
                         type="button"
                         className="lm-ghost"
@@ -685,6 +832,59 @@ export function AccessReviewSection({ onChanged }) {
           </table>
         </div>
       </div>
+
+      {associate ? (
+        <div className="lm-modal-overlay" onClick={associateBusy ? undefined : () => setAssociate(null)}>
+          <div className="lm-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Associate change</h2>
+            <p className="sub">
+              Move all clients from the outgoing associate to the incoming one. The outgoing associate is
+              deactivated and signed out everywhere, and the incoming associate is emailed a link to set up their password.
+            </p>
+            <div className="stack">
+              <div>
+                <label htmlFor="assoc-from">Outgoing associate *</label>
+                <select
+                  id="assoc-from"
+                  className="lm-inp"
+                  value={associate.fromAdminId}
+                  onChange={(e) => setAssociate({ ...associate, fromAdminId: e.target.value })}
+                >
+                  <option value="">Select admin</option>
+                  {activeAdmins.map((a) => (
+                    <option key={a.id} value={a.id}>{a.username}{a.name ? ` (${a.name})` : ''} · {a.client_count} client(s)</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="assoc-to">Incoming associate *</label>
+                <select
+                  id="assoc-to"
+                  className="lm-inp"
+                  value={associate.toAdminId}
+                  onChange={(e) => setAssociate({ ...associate, toAdminId: e.target.value })}
+                >
+                  <option value="">Select admin</option>
+                  {activeAdmins.filter((a) => String(a.id) !== String(associate.fromAdminId)).map((a) => (
+                    <option key={a.id} value={a.id}>{a.username}{a.name ? ` (${a.name})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="lm-modal-acts">
+                <button type="button" className="lm-ghost" onClick={() => setAssociate(null)} disabled={associateBusy}>Cancel</button>
+                <button
+                  type="button"
+                  className="lm-btn"
+                  onClick={confirmAssociateChange}
+                  disabled={associateBusy || !associate.fromAdminId || !associate.toAdminId}
+                >
+                  {associateBusy ? 'Working…' : 'Confirm associate change'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {deactivating ? (
         <TextPromptModal

@@ -5,11 +5,19 @@ import rateLimit from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
 import pool from '../config/database.js';
 import { generateToken, authenticateToken } from '../middleware/auth.js';
-import { generateAdminToken } from '../middleware/adminAuth.js';
+import { generateAdminToken, authenticateAdmin } from '../middleware/adminAuth.js';
 import { notifyEmail } from '../lib/notify.js';
+import {
+  decryptTotpSecret,
+  encryptTotpSecret,
+  generateTotpSecret,
+  otpauthUrl,
+  verifyTotp,
+} from '../lib/totp.js';
 import {
   APP_BASE_URL,
   PRIVACY_CONTACT,
+  PRIVACY_CONTACT_NAME,
   PRIVACY_NOTICE_VERSION,
   RESET_TTL_MS,
   alertSuperAdmins,
@@ -22,6 +30,7 @@ import {
   isSessionValid,
   issueOtp,
   logActivity,
+  logPlanView,
   newJti,
   newPrivacyRef,
   normalizeEmail,
@@ -155,7 +164,7 @@ async function loadAccount(role, id) {
   }
   if (role === 'admin') {
     const r = await pool.query(
-      `SELECT id, username, name, email, is_active, failed_attempts, locked_until
+      `SELECT id, username, name, email, is_active, failed_attempts, locked_until, totp_secret
        FROM admin WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     );
@@ -163,7 +172,7 @@ async function loadAccount(role, id) {
   }
   if (role === 'super_admin') {
     const r = await pool.query(
-      `SELECT id, username, email, failed_attempts, locked_until FROM super_admin WHERE id = $1`,
+      `SELECT id, username, email, failed_attempts, locked_until, totp_secret FROM super_admin WHERE id = $1`,
       [id]
     );
     return r.rows[0] || null;
@@ -399,6 +408,16 @@ router.post('/login', loginLimiter, [
       const ok = await bcrypt.compare(password, account.password_hash || '');
       if (!ok) {
         const failure = await registerFailure(ROLE_TABLE[candidate.role], account.id);
+        await logActivity({
+          actorRole: candidate.role,
+          actorId: account.id,
+          actorLabel: actorLabel(candidate.role, account),
+          action: 'failed_login',
+          targetType: candidate.role === 'client' ? 'user' : candidate.role,
+          targetId: account.id,
+          teamAdminId: teamAdminFor(candidate.role, account),
+          meta: { stage: 'password', failedAttempts: failure?.failed_attempts ?? null, ip: req.ip || null },
+        });
         if (failure && isLocked(failure)) {
           lockedHit = true;
           await logActivity({
@@ -502,7 +521,10 @@ router.post('/login/resend', resendLimiter, [
 
 router.post('/login/verify', verifyLimiter, [
   body('pendingToken').notEmpty().withMessage('Sign-in session missing'),
-  body('otp').notEmpty().withMessage('Enter the 6-digit code we emailed you'),
+  body('otp').custom((value, { req }) => {
+    if (String(value || req.body.totp || '').trim()) return true;
+    throw new Error('Enter the 6-digit code we emailed you');
+  }),
 ], async (req, res) => {
   try {
     if (validationFailed(req, res)) return;
@@ -526,9 +548,44 @@ router.post('/login/verify', verifyLimiter, [
       return res.status(403).json({ error: 'No email address is on file for this account.' });
     }
 
-    const otp = await consumeOtp(account.email, 'login', req.body.otp);
-    if (otp.error) {
-      return res.status(otp.status || 400).json({ error: otp.error });
+    // Staff with an authenticator app (TOTP) may use that code instead of the emailed code.
+    const submitted = String(req.body.otp || req.body.totp || '').replace(/\s+/g, '');
+    let totpUsed = false;
+    if (pending.role !== 'client' && account.totp_secret) {
+      const secret = decryptTotpSecret(account.totp_secret);
+      totpUsed = Boolean(secret) && verifyTotp(secret, submitted);
+    }
+
+    if (!totpUsed) {
+      const otp = await consumeOtp(account.email, 'login', submitted, {
+        role: pending.role,
+        subjectId: account.id,
+        tableSql: ROLE_TABLE[pending.role],
+        actorLabel: actorLabel(pending.role, account),
+        teamAdminId: teamAdminFor(pending.role, account),
+        ip: req.ip || null,
+      });
+      if (otp.error) {
+        if (otp.locked) {
+          await logActivity({
+            actorRole: pending.role,
+            actorId: account.id,
+            actorLabel: actorLabel(pending.role, account),
+            action: 'account_locked',
+            targetType: pending.role === 'client' ? 'user' : pending.role,
+            targetId: account.id,
+            teamAdminId: teamAdminFor(pending.role, account),
+            meta: { stage: 'otp', failedAttempts: otp.failedAttempts ?? null },
+          });
+          if (pending.role !== 'client') {
+            await alertSuperAdmins(
+              'LifeMap security alert: staff account locked',
+              `The ${pending.role === 'admin' ? 'admin' : 'super admin'} account "${account.username}" was locked after repeated incorrect sign-in codes (IP ${req.ip || 'unknown'}).`
+            );
+          }
+        }
+        return res.status(otp.status || 400).json({ error: otp.error });
+      }
     }
 
     await clearFailures(ROLE_TABLE[pending.role], account.id);
@@ -544,7 +601,7 @@ router.post('/login/verify', verifyLimiter, [
       targetType: pending.role === 'client' ? 'user' : pending.role,
       targetId: account.id,
       teamAdminId: teamAdminFor(pending.role, account),
-      meta: { ip: req.ip || null },
+      meta: { ip: req.ip || null, method: totpUsed ? 'totp' : 'email_otp' },
     });
 
     const token = pending.role === 'client'
@@ -926,6 +983,8 @@ router.get('/privacy-meta', (req, res) => {
   res.json({
     version: PRIVACY_NOTICE_VERSION,
     contact: PRIVACY_CONTACT,
+    contactEmail: PRIVACY_CONTACT,
+    contactName: PRIVACY_CONTACT_NAME,
     privacyUrl: `${APP_BASE_URL}/privacy`,
     termsUrl: `${APP_BASE_URL}/terms`,
   });
@@ -1001,6 +1060,179 @@ router.get('/privacy-requests', authenticateToken, async (req, res) => {
     res.json({ requests: result.rows });
   } catch (error) {
     console.error('Privacy requests list error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ---------- Client activity (transparency) ----------
+
+// The signed-in client's own account activity only (rows where they are the actor).
+router.get('/activity-log', authenticateToken, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 50, 1), 200);
+    const result = await pool.query(
+      `SELECT id, action, target_type, target_id, meta, created_at
+       FROM activity_log
+       WHERE actor_role = 'client' AND actor_id = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT $2`,
+      [req.user.id, limit]
+    );
+    res.json({ entries: result.rows });
+  } catch (error) {
+    console.error('Client activity log error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// A client opened their own plan (staff use POST /api/admin/activity/plan-view).
+router.post('/activity/plan-view', authenticateToken, async (req, res) => {
+  try {
+    const owner = await pool.query('SELECT admin_id FROM "user" WHERE id = $1 AND deleted_at IS NULL', [req.user.id]);
+    const logged = await logPlanView({
+      actorRole: 'client',
+      actorId: req.user.id,
+      actorLabel: req.user.email,
+      clientId: req.user.id,
+      teamAdminId: owner.rows[0]?.admin_id || null,
+    });
+    res.json({ logged });
+  } catch (error) {
+    console.error('Plan view log error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ---------- Staff authenticator app (TOTP) ----------
+
+async function loadStaffSecurity(req) {
+  const result = await pool.query(
+    `SELECT id, username, email, password_hash, totp_secret, totp_pending_secret
+     FROM ${ROLE_TABLE[req.admin.role]} WHERE id = $1`,
+    [req.admin.id]
+  );
+  return result.rows[0] || null;
+}
+
+const staffActor = (req) => ({
+  actorRole: req.admin.role,
+  actorId: req.admin.id,
+  actorLabel: req.admin.username,
+  targetType: req.admin.role,
+  targetId: req.admin.id,
+  teamAdminId: req.admin.role === 'admin' ? req.admin.id : null,
+});
+
+router.get('/totp/status', authenticateAdmin, async (req, res) => {
+  try {
+    const row = await loadStaffSecurity(req);
+    res.json({ enabled: Boolean(row?.totp_secret) });
+  } catch (error) {
+    console.error('TOTP status error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Step 1: create a pending secret and return the otpauth:// URL for the authenticator app.
+router.post('/totp/setup', sensitiveLimiter, authenticateAdmin, async (req, res) => {
+  try {
+    const row = await loadStaffSecurity(req);
+    if (!row) return res.status(404).json({ error: 'Account not found' });
+    if (row.totp_secret) {
+      return res.status(400).json({ error: 'An authenticator app is already enabled. Disable it first to set up a new one.' });
+    }
+    const secret = generateTotpSecret();
+    await pool.query(
+      `UPDATE ${ROLE_TABLE[req.admin.role]} SET totp_pending_secret = $1, updated_at = NOW() WHERE id = $2`,
+      [encryptTotpSecret(secret), row.id]
+    );
+    res.json({
+      secret,
+      otpauthUrl: otpauthUrl({ secret, account: row.email || row.username }),
+      message: 'Add this to your authenticator app, then confirm with a 6-digit code.',
+    });
+  } catch (error) {
+    console.error('TOTP setup error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Step 2: prove the app works by entering a current code; only then is the secret saved.
+router.post('/totp/enable', sensitiveLimiter, authenticateAdmin, [
+  body('code').notEmpty().withMessage('Enter the 6-digit code from your authenticator app'),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+    const row = await loadStaffSecurity(req);
+    if (!row) return res.status(404).json({ error: 'Account not found' });
+    const pending = decryptTotpSecret(row.totp_pending_secret);
+    if (!pending) {
+      return res.status(400).json({ error: 'Start the authenticator setup first' });
+    }
+    if (!verifyTotp(pending, req.body.code)) {
+      return res.status(400).json({ error: 'That code is incorrect. Check your authenticator app and try again.' });
+    }
+    await pool.query(
+      `UPDATE ${ROLE_TABLE[req.admin.role]}
+       SET totp_secret = totp_pending_secret, totp_pending_secret = NULL, updated_at = NOW()
+       WHERE id = $1`,
+      [row.id]
+    );
+    await logActivity({ ...staffActor(req), action: 'totp_enabled' });
+    if (row.email) {
+      await notifyEmail(
+        row.email,
+        'Authenticator app enabled on your LifeMap account',
+        'An authenticator app was added to your LifeMap account. You can now sign in with its 6-digit code instead of the emailed code.\n\nIf this was not you, contact a super admin immediately.'
+      );
+    }
+    res.json({ message: 'Authenticator app enabled', enabled: true });
+  } catch (error) {
+    console.error('TOTP enable error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Disabling needs the password and a fresh proof of possession: a current authenticator code or an emailed code.
+router.post('/totp/disable', sensitiveLimiter, authenticateAdmin, [
+  body('password').notEmpty().withMessage('Enter your password'),
+  body('otp').notEmpty().withMessage('Enter an authenticator code or the code we emailed you'),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+    const row = await loadStaffSecurity(req);
+    if (!row) return res.status(404).json({ error: 'Account not found' });
+    if (!row.totp_secret) {
+      return res.status(400).json({ error: 'No authenticator app is enabled' });
+    }
+    const passwordOk = await bcrypt.compare(String(req.body.password), row.password_hash || '');
+    if (!passwordOk) {
+      return res.status(401).json({ error: 'Password is incorrect' });
+    }
+    const secret = decryptTotpSecret(row.totp_secret);
+    let proven = Boolean(secret) && verifyTotp(secret, req.body.otp);
+    if (!proven) {
+      if (!row.email) return res.status(400).json({ error: 'That code is incorrect' });
+      const code = await consumeOtp(row.email, 'sensitive', req.body.otp);
+      if (code.error) return res.status(code.status || 400).json({ error: code.error });
+      proven = true;
+    }
+    await pool.query(
+      `UPDATE ${ROLE_TABLE[req.admin.role]}
+       SET totp_secret = NULL, totp_pending_secret = NULL, updated_at = NOW() WHERE id = $1`,
+      [row.id]
+    );
+    await logActivity({ ...staffActor(req), action: 'totp_disabled' });
+    if (row.email) {
+      await notifyEmail(
+        row.email,
+        'Authenticator app removed from your LifeMap account',
+        'The authenticator app was removed from your LifeMap account. Sign-in now uses the emailed code only.\n\nIf this was not you, contact a super admin immediately.'
+      );
+    }
+    res.json({ message: 'Authenticator app disabled', enabled: false });
+  } catch (error) {
+    console.error('TOTP disable error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import ApiService from '../services/api';
 import Shell from './Shell';
 import MockupHost from './MockupHost';
 import { AdminUserProvider } from '../contexts/AdminUserContext';
@@ -32,6 +33,12 @@ function sectionFromPath(path) {
 export default function ClientPlanView({ clientId, clientName, onBack, onClientUpdated }) {
   const [activeSection, setActiveSection] = useState('dashboard');
   const { admin, adminLogout } = useAuth();
+
+  // Audit trail: staff opened this client's plan (the server de-duplicates repeat views)
+  useEffect(() => {
+    if (!clientId) return;
+    ApiService.logPlanView({ clientId }).catch(() => { /* logging must never block viewing */ });
+  }, [clientId]);
 
   const handleLogout = async () => {
     await adminLogout();

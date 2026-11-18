@@ -6,8 +6,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import ApiService from '@/services/api';
 import {
   PRIVACY_CONTACT_FALLBACK,
+  PRIVACY_CONTACT_NAME_FALLBACK,
   PRIVACY_NOTICE_VERSION_FALLBACK,
   formatDate,
+  formatDateTime,
 } from '@/lib/password';
 
 const REQUEST_TYPES = [
@@ -33,6 +35,23 @@ const REQUEST_TYPES = [
 
 const TYPE_LABEL = Object.fromEntries(REQUEST_TYPES.map((t) => [t.value, t.label]));
 
+function activityLabel(action) {
+  return String(action || '').replace(/_/g, ' ');
+}
+
+function activityDetail(entry) {
+  const meta = entry.meta && typeof entry.meta === 'object' ? entry.meta : {};
+  const bits = [];
+  if (meta.ip) bits.push(`IP ${meta.ip}`);
+  if (meta.op) bits.push(meta.op);
+  if (meta.ref) bits.push(meta.ref);
+  if (meta.stage) bits.push(`${meta.stage} step`);
+  const target = entry.target_type
+    ? `${String(entry.target_type).replace(/_/g, ' ')}${entry.target_id ? ` #${entry.target_id}` : ''}`
+    : '';
+  return [target, ...bits].filter(Boolean).join(' · ') || '—';
+}
+
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (s === 'completed') return 'on';
@@ -45,9 +64,12 @@ export default function PrivacyDataPage() {
   const [meta, setMeta] = useState({
     version: PRIVACY_NOTICE_VERSION_FALLBACK,
     contact: PRIVACY_CONTACT_FALLBACK,
+    contactName: PRIVACY_CONTACT_NAME_FALLBACK,
   });
   const [requests, setRequests] = useState([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
+  const [activity, setActivity] = useState([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
   const [form, setForm] = useState({ type: 'correction', details: '' });
   const [submitting, setSubmitting] = useState(false);
   const [revoking, setRevoking] = useState(false);
@@ -72,9 +94,24 @@ export default function PrivacyDataPage() {
       .catch(() => { /* fall back to built-in contact */ });
   }, []);
 
+  const loadActivity = useCallback(async () => {
+    setLoadingActivity(true);
+    try {
+      const res = await ApiService.getMyActivity({ limit: 50 });
+      setActivity(res.entries || []);
+    } catch (error) {
+      toast.error(error.message || 'Could not load your account activity');
+    } finally {
+      setLoadingActivity(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (user) loadRequests();
-  }, [user, loadRequests]);
+    if (user) {
+      loadRequests();
+      loadActivity();
+    }
+  }, [user, loadRequests, loadActivity]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -155,7 +192,9 @@ export default function PrivacyDataPage() {
               <Link to="/terms" className="lm-tlink" style={{ padding: 0, textDecoration: 'underline' }}>Terms of Use</Link>.
             </p>
             <p style={{ margin: 0 }}>
-              Privacy contact: <a href={`mailto:${meta.contact}`}>{meta.contact}</a>
+              Privacy contact (grievance officer): <strong>{meta.contactName || PRIVACY_CONTACT_NAME_FALLBACK}</strong>
+              {' · '}
+              <a href={`mailto:${meta.contactEmail || meta.contact}`}>{meta.contactEmail || meta.contact}</a>
             </p>
           </div>
         </div>
@@ -225,6 +264,41 @@ export default function PrivacyDataPage() {
                     <td>{formatDate(r.created_at)}</td>
                     <td>{r.closed_at ? `Closed ${formatDate(r.closed_at)}` : formatDate(r.due_at)}</td>
                     <td style={{ maxWidth: 320, whiteSpace: 'pre-wrap' }}>{r.details || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="lm-card" style={{ marginBottom: 16 }}>
+          <div className="lm-reghead">
+            <h3>Your account activity</h3>
+            <span className="count">latest {activity.length}</span>
+          </div>
+          <p className="lm-hint" style={{ padding: '0 16px 8px', margin: 0 }}>
+            Sign-ins and changes made from your account. If you see something you do not recognise,
+            sign out of all devices below and change your password.
+          </p>
+          <div className="lm-tblwrap">
+            <table className="lm-tbl">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>What</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingActivity && activity.length === 0 ? (
+                  <tr><td className="empty" colSpan={3}>Loading…</td></tr>
+                ) : activity.length === 0 ? (
+                  <tr><td className="empty" colSpan={3}>No activity recorded yet</td></tr>
+                ) : activity.map((entry) => (
+                  <tr key={entry.id}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(entry.created_at)}</td>
+                    <td style={{ textTransform: 'capitalize' }}>{activityLabel(entry.action)}</td>
+                    <td style={{ fontSize: 12.5, color: 'var(--lm-muted)', wordBreak: 'break-word' }}>{activityDetail(entry)}</td>
                   </tr>
                 ))}
               </tbody>

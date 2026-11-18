@@ -42,6 +42,10 @@ Backend env (do not wipe):
 - `PORT` = `10000`
 - `OPENAI_API_KEY` = optional, expense classify fallback
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` = email OTP for public signup (or `RESEND_API_KEY` instead)
+- `APP_BASE_URL` = `https://lifemap.finance` (invite/reset links)
+- `PRIVACY_CONTACT` / `PRIVACY_CONTACT_NAME` = grievance mailbox and officer name
+- `TOTP_ENC_KEY` = optional; encrypts staff authenticator secrets (else `JWT_SECRET`)
+- Ops runbook: `docs/COMPLIANCE_OPS.md` (CERT-In 6h, encryption, log retention, India residency)
 
 **Never set `DATABASE_INIT=true`.** That runs a wipe-and-recreate script.
 

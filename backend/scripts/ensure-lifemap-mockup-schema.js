@@ -233,6 +233,28 @@ const STATEMENTS = [
     )`,
   `CREATE INDEX IF NOT EXISTS idx_privacy_request_user ON privacy_request(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_privacy_request_status ON privacy_request(status)`,
+  // Legal hold: items with legal_hold = TRUE are skipped by the 90-day purge and cannot be purged manually.
+  `ALTER TABLE deleted_items ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN DEFAULT FALSE`,
+  `CREATE INDEX IF NOT EXISTS idx_deleted_items_user ON deleted_items((payload->>'user_id'))`,
+  // Periodic access review (super admin keeps or deactivates each admin)
+  `CREATE TABLE IF NOT EXISTS access_review_decision (
+      id SERIAL PRIMARY KEY,
+      admin_id INTEGER,
+      decision VARCHAR(20) NOT NULL,
+      decided_by INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`,
+  `CREATE INDEX IF NOT EXISTS idx_access_review_decision_admin ON access_review_decision(admin_id, created_at DESC)`,
+  // Staff TOTP (authenticator app). totp_secret is stored encrypted; the pending column holds a secret
+  // between POST /totp/setup and POST /totp/enable.
+  `ALTER TABLE admin ADD COLUMN IF NOT EXISTS totp_secret VARCHAR`,
+  `ALTER TABLE super_admin ADD COLUMN IF NOT EXISTS totp_secret VARCHAR`,
+  `ALTER TABLE admin ADD COLUMN IF NOT EXISTS totp_pending_secret VARCHAR`,
+  `ALTER TABLE super_admin ADD COLUMN IF NOT EXISTS totp_pending_secret VARCHAR`,
+  // activity_log is APPEND-ONLY: the application only ever INSERTs and SELECTs. There must be no UPDATE or
+  // DELETE statements against it, and it must never be truncated: entries are retained for at least one
+  // year (see docs/COMPLIANCE_OPS.md). Any retention archiving is a manual, audited DBA task.
+  `COMMENT ON TABLE activity_log IS 'Append-only audit trail. No UPDATE/DELETE/TRUNCATE; retain >= 1 year.'`,
 ]
 
 export async function ensureLifemapMockupSchema(pool) {
