@@ -50,7 +50,7 @@ export const setAdminUserContext = async (req, res, next) => {
 
     // Verify user exists and is assigned to this admin (if admin, not super admin)
     const userCheck = await pool.query(
-      'SELECT id, email, name, admin_id FROM "user" WHERE id = $1',
+      'SELECT id, email, name, admin_id FROM "user" WHERE id = $1 AND deleted_at IS NULL',
       [userId]
     );
 

@@ -1807,7 +1807,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
         wrap.appendChild(link);
         var menu = document.createElement("div");
         menu.className = "lm-acct-menu";
-        menu.innerHTML = '<button type="button" data-act="profile">Your profile</button><button type="button" data-act="logout" class="out">Log out</button>';
+        menu.innerHTML = '<button type="button" data-act="profile">Your profile</button><button type="button" data-act="privacy">Privacy &amp; Data</button><button type="button" data-act="logout" class="out">Log out</button>';
         wrap.appendChild(menu);
         menu.addEventListener("click", function(e){
           var btn = e.target.closest("button");
@@ -1815,6 +1815,7 @@ document.querySelectorAll(".pmore").forEach(btn => {
           wrap.classList.remove("open");
           var act = btn.getAttribute("data-act");
           if (act === "profile") post("navigate", { path: "/profile" });
+          if (act === "privacy") post("navigate", { path: "/privacy-data" });
           if (act === "logout") post("logout");
         });
         link.addEventListener("click", function(e){
@@ -1903,6 +1904,18 @@ document.querySelectorAll(".pmore").forEach(btn => {
       setTimeout(function(){ post("row-save", getState()); }, 40);
     }
   }, true);
+
+  // Idle-logout keep-alive: iframe events never reach the parent window, so ping it (throttled).
+  var lastActivityPing = 0;
+  function pingActivity(){
+    var now = Date.now();
+    if (now - lastActivityPing < 15000) return;
+    lastActivityPing = now;
+    post("activity");
+  }
+  ["mousemove", "keydown", "click", "scroll", "touchstart"].forEach(function(evt){
+    document.addEventListener(evt, pingActivity, { passive: true, capture: true });
+  });
 
   var rowSaveTimer = null;
   function queueRowSave(){

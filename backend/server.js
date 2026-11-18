@@ -30,6 +30,7 @@ import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import pool from './config/database.js';
 import { ensureLifemapMockupSchema } from './scripts/ensure-lifemap-mockup-schema.js';
+import { purgeExpiredDeletedItems } from './lib/security.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -348,6 +349,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 
 // Start server after schema patches so new mockup columns exist
 ensureLifemapMockupSchema(pool)
+  .then(() => purgeExpiredDeletedItems())
   .catch((error) => {
     console.error('[migrate] LifeMap mockup schema failed (server will still start):', error.message);
   })

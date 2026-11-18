@@ -4,22 +4,19 @@ import PageHeader from '@/components/PageHeader.jsx';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAdminUser } from '@/contexts/AdminUserContext';
 import ApiService from '@/services/api';
+import { passwordProblem, PASSWORD_HINT } from '@/lib/password';
 import { toast } from 'sonner';
-
-function generateLoginPassword(length = 12) {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
-}
 
 function splitName(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
   return { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') };
 }
 
+const emptyPasswordData = { currentPassword: '', newPassword: '', confirmPassword: '', otp: '' };
+const emptyEmailData = { newEmail: '', currentPassword: '', otp: '' };
+
 export default function ProfilePage() {
-  const { user, setUser } = useAuth();
+  const { user, setUser, logout } = useAuth();
   const adminUser = useAdminUser();
   const isAdminMode = !!adminUser?.userId;
   const effectiveUserId = isAdminMode ? adminUser.userId : (user?.id || null);
@@ -45,14 +42,18 @@ export default function ProfilePage() {
 
   const [tempValues, setTempValues] = useState({});
   const [loading, setLoading] = useState(false);
+
+  // Sensitive changes (password / email) need the current password and an emailed code
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
-  const [issuedPassword, setIssuedPassword] = useState(null);
-  const [passwordData, setPasswordData] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: ''
-  });
+  const [changeEmailOpen, setChangeEmailOpen] = useState(false);
+  const [passwordData, setPasswordData] = useState(emptyPasswordData);
+  const [emailData, setEmailData] = useState(emptyEmailData);
+  const [otpSent, setOtpSent] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [devCode, setDevCode] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  const [changingEmail, setChangingEmail] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
 
   useEffect(() => {
     if (!isAdminMode && user) {
@@ -205,41 +206,76 @@ export default function ProfilePage() {
     }
   };
 
+  // ---- Sensitive changes: security code, password, email ----
+
+  const resetSensitiveState = () => {
+    setPasswordData(emptyPasswordData);
+    setEmailData(emptyEmailData);
+    setOtpSent(false);
+    setDevCode('');
+  };
+
+  const closePasswordModal = () => {
+    setChangePasswordOpen(false);
+    resetSensitiveState();
+  };
+
+  const closeEmailModal = () => {
+    setChangeEmailOpen(false);
+    resetSensitiveState();
+  };
+
+  // The code is always sent to the email currently on the account
+  const handleSendSecurityCode = async () => {
+    const accountEmail = user?.email || profile.email;
+    if (!accountEmail) {
+      toast.error('No email address is on file for this account');
+      return;
+    }
+    try {
+      setSendingOtp(true);
+      const res = await ApiService.requestOtp({ email: accountEmail, purpose: 'sensitive' });
+      setOtpSent(true);
+      setDevCode(res?.devCode || '');
+      toast.success('We emailed you a 6-digit code');
+    } catch (error) {
+      toast.error(error.message || 'Could not send the code');
+    } finally {
+      setSendingOtp(false);
+    }
+  };
+
   const handleChangePassword = async () => {
     if (passwordData.newPassword !== passwordData.confirmPassword) {
       toast.error('New passwords do not match');
       return;
     }
-
-    if (passwordData.newPassword.length < 6) {
-      toast.error('Password must be at least 6 characters long');
+    const problem = passwordProblem(passwordData.newPassword);
+    if (problem) {
+      toast.error(problem);
       return;
     }
-
-    if (!isAdminMode && !passwordData.currentPassword) {
+    if (!passwordData.currentPassword) {
       toast.error('Enter your current password');
+      return;
+    }
+    if (!otpSent || passwordData.otp.length < 6) {
+      toast.error('Request a security code and enter the 6 digits');
       return;
     }
 
     setChangingPassword(true);
     try {
-      if (isAdminMode) {
-        await ApiService.updateUser(effectiveUserId, { password: passwordData.newPassword });
-        setIssuedPassword(passwordData.newPassword);
-        toast.success('Password updated. Copy it and give it to the client privately.');
-      } else {
-        await ApiService.changePassword({
-          currentPassword: passwordData.currentPassword,
-          newPassword: passwordData.newPassword
-        });
-        toast.success('Password changed successfully');
-        setChangePasswordOpen(false);
-      }
-      setPasswordData({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
+      await ApiService.changePassword({
+        currentPassword: passwordData.currentPassword,
+        newPassword: passwordData.newPassword,
+        otp: passwordData.otp,
       });
+      toast.success('Password changed. Please sign in again.');
+      closePasswordModal();
+      // Backend signs out every device after a password change
+      await logout();
+      window.location.assign('/?signin=1');
     } catch (error) {
       console.error('Failed to change password:', error);
       toast.error(error.message || 'Failed to change password');
@@ -248,18 +284,82 @@ export default function ProfilePage() {
     }
   };
 
-  const copyIssued = async () => {
+  const handleChangeEmail = async () => {
+    const newEmail = emailData.newEmail.trim();
+    if (!newEmail) {
+      toast.error('Enter your new email address');
+      return;
+    }
+    if (!emailData.currentPassword) {
+      toast.error('Enter your current password');
+      return;
+    }
+    if (!otpSent || emailData.otp.length < 6) {
+      toast.error('Request a security code and enter the 6 digits');
+      return;
+    }
+    setChangingEmail(true);
     try {
-      await navigator.clipboard.writeText(issuedPassword);
-      toast.success('Password copied');
-    } catch {
-      toast.error('Could not copy. Select the password and copy it yourself.');
+      const res = await ApiService.updateProfile({
+        email: newEmail,
+        currentPassword: emailData.currentPassword,
+        otp: emailData.otp,
+      });
+      if (res.user) applyUserRecord(res.user);
+      toast.success('Email updated');
+      closeEmailModal();
+    } catch (error) {
+      console.error('Failed to change email:', error);
+      toast.error(error.message || 'Failed to change email');
+    } finally {
+      setChangingEmail(false);
     }
   };
 
+  // Admin viewing a client: no passwords are ever set or shown, only a reset/invite email
+  const handleSendResetLink = async () => {
+    if (!window.confirm('Email this client a link to set a new password?')) return;
+    setSendingReset(true);
+    try {
+      const res = await ApiService.sendUserReset(effectiveUserId);
+      toast.success(res?.message || 'Reset link sent');
+    } catch (error) {
+      toast.error(error.message || 'Could not send the reset link');
+    } finally {
+      setSendingReset(false);
+    }
+  };
+
+  const renderPasswordField = () => (
+    <label className="lm-field">
+      <span>Password *</span>
+      <div className="lm-field-ctrl">
+        <input className="lm-inp" type="password" value="••••••••••••" readOnly />
+        {isAdminMode ? (
+          <button type="button" className="lm-ghost" onClick={handleSendResetLink} disabled={sendingReset}>
+            {sendingReset ? 'Sending…' : 'Send reset link'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="lm-iconbtn"
+            onClick={() => { resetSensitiveState(); setChangePasswordOpen(true); }}
+            aria-label="Change password"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    </label>
+  );
+
   const renderField = (field, label, type = 'text', wide = false) => {
+    if (field === 'password') return renderPasswordField();
+
     const isEditing = editing[field];
     const value = isEditing ? (tempValues[field] ?? profile[field]) : profile[field];
+    // Clients change their own email through the code-protected dialog
+    const emailViaDialog = field === 'email' && !isAdminMode;
 
     return (
       <label className={`lm-field ${wide ? 'wide' : ''}`}>
@@ -285,14 +385,21 @@ export default function ProfilePage() {
             <>
               <input
                 className="lm-inp"
-                type={field === 'password' ? 'password' : type}
-                value={field === 'password' ? '••••••••••••' : value}
+                type={type}
+                value={value}
                 readOnly
               />
               <button
                 type="button"
                 className="lm-iconbtn"
-                onClick={() => field === 'password' ? setChangePasswordOpen(true) : handleEdit(field)}
+                onClick={() => {
+                  if (emailViaDialog) {
+                    resetSensitiveState();
+                    setChangeEmailOpen(true);
+                  } else {
+                    handleEdit(field);
+                  }
+                }}
                 aria-label={`Edit ${label}`}
               >
                 <Pencil className="h-4 w-4" />
@@ -304,13 +411,44 @@ export default function ProfilePage() {
     );
   };
 
+  const securityCodeBlock = (value, onChange) => (
+    <div>
+      <label htmlFor="sec-otp">Security code</label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          id="sec-otp"
+          className="lm-inp"
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="6-digit code"
+          maxLength={6}
+          value={value}
+          onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          style={{ flex: 1 }}
+          disabled={!otpSent}
+        />
+        <button type="button" className="lm-ghost" onClick={handleSendSecurityCode} disabled={sendingOtp}>
+          {sendingOtp ? 'Sending…' : (otpSent ? 'Resend code' : 'Email me a code')}
+        </button>
+      </div>
+      <p className="lm-hint">
+        {devCode
+          ? `Dev code: ${devCode}`
+          : `We send the code to ${user?.email || 'your email'}. It expires in 10 minutes.`}
+      </p>
+    </div>
+  );
+
+  const newPasswordProblem = passwordData.newPassword ? passwordProblem(passwordData.newPassword) : null;
+
   return (
     <div className="lm-body">
       <div id="sec-register">
         <PageHeader
           title="Your profile"
           description={isAdminMode
-            ? 'This is the client account LifeMap greets and saves the plan against. You can edit it the same way they can.'
+            ? 'This is the client account LifeMap greets and saves the plan against. You can edit their details, or email them a link to set a new password.'
             : 'The details LifeMap uses to greet you and to keep your plan saved against this account.'}
         />
 
@@ -332,68 +470,81 @@ export default function ProfilePage() {
       </div>
 
       {changePasswordOpen ? (
-        <div className="lm-modal-overlay" onClick={() => { setChangePasswordOpen(false); setIssuedPassword(null); }}>
+        <div className="lm-modal-overlay" onClick={closePasswordModal}>
           <div className="lm-modal" onClick={(e) => e.stopPropagation()}>
-            {issuedPassword ? (
-              <>
-                <h2>New password</h2>
-                <p className="sub">Give this password to the client. LifeMap will not show it again.</p>
-                <div className="stack">
-                  <div>
-                    <label htmlFor="issued-pass">Password</label>
-                    <input id="issued-pass" className="lm-inp" readOnly value={issuedPassword} />
-                  </div>
-                </div>
-                <div className="lm-modal-acts">
-                  <button type="button" className="lm-ghost" onClick={copyIssued}>Copy</button>
-                  <button type="button" className="lm-btn" onClick={() => { setChangePasswordOpen(false); setIssuedPassword(null); }}>Done</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <h2>{isAdminMode ? 'Reset password' : 'Change password'}</h2>
-                <p className="sub">
-                  {isAdminMode
-                    ? 'Set a new sign-in password for this client. Leave it with them privately.'
-                    : 'Enter your current password and choose a new one.'}
+            <h2>Change password</h2>
+            <p className="sub">
+              Enter your current password, choose a new one and confirm with the code we email you.
+              You will be signed out of every device afterwards.
+            </p>
+            <div className="stack">
+              <div>
+                <label htmlFor="cur-pass">Current password</label>
+                <input id="cur-pass" className="lm-inp" type="password" autoComplete="current-password" value={passwordData.currentPassword} onChange={(e) => setPasswordData((prev) => ({ ...prev, currentPassword: e.target.value }))} />
+              </div>
+              <div>
+                <label htmlFor="new-pass">New password</label>
+                <input id="new-pass" className="lm-inp" type="password" autoComplete="new-password" value={passwordData.newPassword} onChange={(e) => setPasswordData((prev) => ({ ...prev, newPassword: e.target.value }))} />
+                <p className="lm-hint" style={newPasswordProblem ? { color: '#b42318' } : undefined}>
+                  {newPasswordProblem ? `${newPasswordProblem}. ` : ''}{PASSWORD_HINT}
                 </p>
-                <div className="stack">
-                  {isAdminMode ? null : (
-                    <div>
-                      <label htmlFor="cur-pass">Current password</label>
-                      <input id="cur-pass" className="lm-inp" type="password" value={passwordData.currentPassword} onChange={(e) => setPasswordData((prev) => ({ ...prev, currentPassword: e.target.value }))} />
-                    </div>
-                  )}
-                  <div>
-                    <label htmlFor="new-pass">New password</label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <input id="new-pass" className="lm-inp" type={isAdminMode ? 'text' : 'password'} value={passwordData.newPassword} onChange={(e) => setPasswordData((prev) => ({ ...prev, newPassword: e.target.value }))} style={{ flex: 1 }} />
-                      {isAdminMode ? (
-                        <button type="button" className="lm-ghost" onClick={() => {
-                          const password = generateLoginPassword();
-                          setPasswordData((prev) => ({ ...prev, newPassword: password, confirmPassword: password }));
-                        }}>Generate</button>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div>
-                    <label htmlFor="conf-pass">Confirm new password</label>
-                    <input id="conf-pass" className="lm-inp" type={isAdminMode ? 'text' : 'password'} value={passwordData.confirmPassword} onChange={(e) => setPasswordData((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
-                  </div>
-                </div>
-                <div className="lm-modal-acts">
-                  <button type="button" className="lm-ghost" onClick={() => { setChangePasswordOpen(false); setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' }); }}>Cancel</button>
-                  <button
-                    type="button"
-                    className="lm-btn"
-                    onClick={handleChangePassword}
-                    disabled={changingPassword || !passwordData.newPassword || !passwordData.confirmPassword || (!isAdminMode && !passwordData.currentPassword)}
-                  >
-                    {changingPassword ? 'Saving…' : 'Save password'}
-                  </button>
-                </div>
-              </>
-            )}
+              </div>
+              <div>
+                <label htmlFor="conf-pass">Confirm new password</label>
+                <input id="conf-pass" className="lm-inp" type="password" autoComplete="new-password" value={passwordData.confirmPassword} onChange={(e) => setPasswordData((prev) => ({ ...prev, confirmPassword: e.target.value }))} />
+              </div>
+              {securityCodeBlock(passwordData.otp, (otp) => setPasswordData((prev) => ({ ...prev, otp })))}
+            </div>
+            <div className="lm-modal-acts">
+              <button type="button" className="lm-ghost" onClick={closePasswordModal}>Cancel</button>
+              <button
+                type="button"
+                className="lm-btn"
+                onClick={handleChangePassword}
+                disabled={
+                  changingPassword
+                  || !passwordData.currentPassword
+                  || !passwordData.newPassword
+                  || !passwordData.confirmPassword
+                  || passwordData.otp.length < 6
+                }
+              >
+                {changingPassword ? 'Saving…' : 'Save password'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {changeEmailOpen ? (
+        <div className="lm-modal-overlay" onClick={closeEmailModal}>
+          <div className="lm-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Change email</h2>
+            <p className="sub">
+              Confirm with your current password and a code sent to your current email ({user?.email}).
+            </p>
+            <div className="stack">
+              <div>
+                <label htmlFor="new-email-addr">New email</label>
+                <input id="new-email-addr" className="lm-inp" type="email" autoComplete="email" value={emailData.newEmail} onChange={(e) => setEmailData((prev) => ({ ...prev, newEmail: e.target.value }))} />
+              </div>
+              <div>
+                <label htmlFor="email-cur-pass">Current password</label>
+                <input id="email-cur-pass" className="lm-inp" type="password" autoComplete="current-password" value={emailData.currentPassword} onChange={(e) => setEmailData((prev) => ({ ...prev, currentPassword: e.target.value }))} />
+              </div>
+              {securityCodeBlock(emailData.otp, (otp) => setEmailData((prev) => ({ ...prev, otp })))}
+            </div>
+            <div className="lm-modal-acts">
+              <button type="button" className="lm-ghost" onClick={closeEmailModal}>Cancel</button>
+              <button
+                type="button"
+                className="lm-btn"
+                onClick={handleChangeEmail}
+                disabled={changingEmail || !emailData.newEmail || !emailData.currentPassword || emailData.otp.length < 6}
+              >
+                {changingEmail ? 'Saving…' : 'Save email'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

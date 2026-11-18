@@ -106,7 +106,7 @@ Three roles:
 
 One Sign in box on the public app. `POST /api/login` with `{ identifier, password }` (or `{ email, password }`) checks client email, then advisor username, then super admin username, and returns `role` plus the right JWT. Old `/admin/login` and `/super-admin/login` pages redirect to that Sign in.
 
-Public self-signup is **open**. `POST /api/otp` `{ email }` sends a 6-digit code; `POST /api/register` `{ email, name, password, otp }` creates `"user"` with `admin_id` NULL (no RM) and a `financial_profile`. Advisors can still create clients from `/admin` (those get `admin_id`).
+Public self-signup is **open** with privacy consent. Login for clients and staff uses password then email OTP. Admins/clients are invited by email (no typed passwords). Soft delete, activity log, privacy requests, and 60‑minute idle logout are in the app. `POST /api/otp` / `POST /api/register` create `"user"` with `admin_id` NULL (no RM) unless an advisor invites them.
 
 User-facing screens (same UI for client login and admin→client edit):
 

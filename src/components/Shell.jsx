@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronDown, LogOut, Moon, Sun, UserCircle, TrendingUp } from 'lucide-react'
+import { ChevronDown, LogOut, Moon, ShieldCheck, Sun, UserCircle, TrendingUp } from 'lucide-react'
 import FloatingChartDock, { ChartToggleButton } from './FloatingChartDock'
 import { useChart } from '../contexts/ChartContext'
 import { useAuth } from '../contexts/AuthContext'
@@ -65,6 +65,9 @@ const PAGE_SECTIONS = {
   '/profile': [
     { id: 'sec-register', label: 'Your details' },
   ],
+  '/privacy-data': [
+    { id: 'sec-register', label: 'Privacy & Data' },
+  ],
 }
 
 const ADMIN_SECTIONS = {
@@ -102,7 +105,7 @@ export default function Shell({ children, adminMode = false, activeSection, onSe
   const isMainPage = adminMode ? activeSection === 'dashboard' : location.pathname === '/'
   const hideExtraChrome = adminMode
     ? ['insurance', 'profile'].includes(activeSection)
-    : ['/profile', '/growth-assumptions', '/insurance'].includes(location.pathname)
+    : ['/profile', '/growth-assumptions', '/insurance', '/privacy-data'].includes(location.pathname)
   const shouldShowChart = !isMainPage && isChartVisible && !hideExtraChrome
 
   const sections = adminMode
@@ -203,6 +206,12 @@ export default function Shell({ children, adminMode = false, activeSection, onSe
                     <Link to="/growth-assumptions" className="flex items-center gap-2 cursor-pointer">
                       <TrendingUp className="h-4 w-4" />
                       Growth Assumptions
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/privacy-data" className="flex items-center gap-2 cursor-pointer">
+                      <ShieldCheck className="h-4 w-4" />
+                      Privacy &amp; Data
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem
@@ -312,9 +321,9 @@ export default function Shell({ children, adminMode = false, activeSection, onSe
           </span>
           <span className="lm-footer-tag">Invest with Intent.</span>
           <span style={{ marginLeft: 'auto' }}>
-            <a href="#">Terms</a>
+            <Link to="/terms">Terms</Link>
             {' · '}
-            <a href="#">Privacy</a>
+            <Link to="/privacy">Privacy</Link>
           </span>
         </div>
         <div className="lm-disclaimer">

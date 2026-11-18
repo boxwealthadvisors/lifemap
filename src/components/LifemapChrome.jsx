@@ -29,9 +29,9 @@ export function LifemapFooter() {
         </span>
         <span className="lm-footer-tag">Invest with Intent.</span>
         <span style={{ marginLeft: 'auto' }}>
-          <a href="#">Terms</a>
+          <Link to="/terms">Terms</Link>
           {' · '}
-          <a href="#">Privacy</a>
+          <Link to="/privacy">Privacy</Link>
         </span>
       </div>
       <div className="lm-disclaimer">

@@ -1,231 +1,295 @@
 import express from 'express';
-import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
 import pool from '../config/database.js';
 import { generateToken, authenticateToken } from '../middleware/auth.js';
 import { generateAdminToken } from '../middleware/adminAuth.js';
-import { sendMail } from '../lib/mailer.js';
+import { notifyEmail } from '../lib/notify.js';
+import {
+  APP_BASE_URL,
+  PRIVACY_CONTACT,
+  PRIVACY_NOTICE_VERSION,
+  RESET_TTL_MS,
+  alertSuperAdmins,
+  clearFailures,
+  consumeOtp,
+  consumeResetToken,
+  createResetOrInviteToken,
+  createSession,
+  isLocked,
+  isSessionValid,
+  issueOtp,
+  logActivity,
+  newJti,
+  newPrivacyRef,
+  normalizeEmail,
+  registerFailure,
+  resetLink,
+  revokeAllSessions,
+  sendOtpMail,
+  validateStrongPassword,
+  MAX_FAILED_ATTEMPTS,
+  LOCKOUT_MS,
+} from '../lib/security.js';
 
 const router = express.Router();
 
-const OTP_PURPOSE = 'signup';
-const OTP_TTL_MS = 10 * 60 * 1000;
-const OTP_RESEND_MS = 45 * 1000;
-const OTP_MAX_ATTEMPTS = 5;
+const OTP_PURPOSES = ['signup', 'login', 'sensitive'];
+const PRIVACY_REQUEST_TYPES = ['correction', 'withdraw_consent', 'complaint'];
+const PRIVACY_RESPONSE_DAYS = 90;
+const PENDING_TOKEN_TTL = '5m';
 
-const otpLimiter = rateLimit({
+// Never match a real account; used to keep login timing similar for unknown identifiers
+const DUMMY_HASH = bcrypt.hashSync('lifemap-dummy-password-not-real', 12);
+
+const ROLE_TABLE = {
+  client: 'public."user"',
+  admin: 'admin',
+  super_admin: 'super_admin',
+};
+
+const makeLimiter = (max, message) => rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 8,
+  max,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many code requests. Try again later.' },
+  message: { error: message },
 });
 
-function normalizeEmail(value) {
-  return String(value || '').trim().toLowerCase();
+const otpLimiter = makeLimiter(8, 'Too many code requests. Try again later.');
+const loginLimiter = makeLimiter(30, 'Too many sign-in attempts. Try again later.');
+const verifyLimiter = makeLimiter(20, 'Too many verification attempts. Try again later.');
+const forgotLimiter = makeLimiter(10, 'Too many reset requests. Try again later.');
+const resetLimiter = makeLimiter(20, 'Too many attempts. Try again later.');
+const registerLimiter = makeLimiter(20, 'Too many sign-up attempts. Try again later.');
+const resendLimiter = makeLimiter(8, 'Too many code requests. Try again later.');
+const sensitiveLimiter = makeLimiter(15, 'Too many attempts. Try again later.');
+const privacyLimiter = makeLimiter(10, 'Too many privacy requests. Try again later.');
+
+// ---------- helpers ----------
+
+function validationFailed(req, res) {
+  const errors = validationResult(req);
+  if (errors.isEmpty()) return false;
+  res.status(400).json({ error: errors.array()[0]?.msg || 'Validation failed', details: errors.array() });
+  return true;
 }
 
-function hashOtp(email, code) {
-  const secret = process.env.JWT_SECRET || 'lifemap-otp';
-  return crypto.createHmac('sha256', secret).update(`${email}:${code}`).digest('hex');
+const strongPassword = (field) =>
+  body(field).custom((value) => {
+    const problem = validateStrongPassword(value);
+    if (problem) throw new Error(problem);
+    return true;
+  });
+
+function maskEmail(email) {
+  const [local = '', domain = ''] = String(email || '').split('@');
+  if (!domain) return '';
+  return `${local.slice(0, 1)}***@${domain}`;
 }
 
-function otpMatches(email, code, storedHash) {
-  const a = Buffer.from(hashOtp(email, code));
-  const b = Buffer.from(String(storedHash || ''), 'utf8');
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+function clientMeta(req) {
+  return {
+    userAgent: String(req.headers['user-agent'] || '').slice(0, 500) || null,
+    ip: req.ip || null,
+  };
 }
 
-async function consumeValidOtp(email, code) {
+function bearerToken(req) {
+  const authHeader = req.headers['authorization'];
+  return authHeader && authHeader.split(' ')[1];
+}
+
+function publicUser(role, row) {
+  if (role === 'client') return { id: row.id, email: row.email, name: row.name };
+  if (role === 'admin') {
+    return { id: row.id, username: row.username, name: row.name, email: row.email, role: 'admin' };
+  }
+  return { id: row.id, username: row.username, email: row.email, role: 'super_admin' };
+}
+
+function teamAdminFor(role, row) {
+  if (role === 'client') return row.admin_id || null;
+  if (role === 'admin') return row.id;
+  return null;
+}
+
+function actorLabel(role, row) {
+  return role === 'client' ? row.email : row.username;
+}
+
+async function findClientByEmail(email) {
   const result = await pool.query(
-    `SELECT id, code_hash, expires_at, attempts
-     FROM email_otp
-     WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL
-     ORDER BY created_at DESC
+    `SELECT id, email, name, password_hash, admin_id, failed_attempts, locked_until
+     FROM "user" WHERE LOWER(email) = $1 AND deleted_at IS NULL LIMIT 1`,
+    [normalizeEmail(email)]
+  );
+  return result.rows[0] || null;
+}
+
+async function findStaff(role, identifier) {
+  const isAdmin = role === 'admin';
+  const result = await pool.query(
+    `SELECT id, username, ${isAdmin ? 'name,' : ''} email, password_hash,
+            ${isAdmin ? 'is_active,' : ''} failed_attempts, locked_until
+     FROM ${ROLE_TABLE[role]}
+     WHERE (username = $1 OR LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1))
+       ${isAdmin ? 'AND deleted_at IS NULL' : ''}
+     ORDER BY (username = $1) DESC
      LIMIT 1`,
-    [email, OTP_PURPOSE]
+    [identifier]
   );
-  const row = result.rows[0];
-  if (!row) return { error: 'Enter the code we emailed you', status: 400 };
-  if (new Date(row.expires_at).getTime() < Date.now()) {
-    return { error: 'That code has expired. Request a new one.', status: 400 };
+  return result.rows[0] || null;
+}
+
+async function loadAccount(role, id) {
+  if (role === 'client') {
+    const r = await pool.query(
+      `SELECT id, email, name, admin_id, failed_attempts, locked_until
+       FROM "user" WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    return r.rows[0] || null;
   }
-  if ((row.attempts || 0) >= OTP_MAX_ATTEMPTS) {
-    return { error: 'Too many incorrect codes. Request a new one.', status: 400 };
+  if (role === 'admin') {
+    const r = await pool.query(
+      `SELECT id, username, name, email, is_active, failed_attempts, locked_until
+       FROM admin WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    return r.rows[0] || null;
   }
-  if (!otpMatches(email, code, row.code_hash)) {
-    await pool.query('UPDATE email_otp SET attempts = attempts + 1 WHERE id = $1', [row.id]);
-    return { error: 'That code is incorrect', status: 400 };
+  if (role === 'super_admin') {
+    const r = await pool.query(
+      `SELECT id, username, email, failed_attempts, locked_until FROM super_admin WHERE id = $1`,
+      [id]
+    );
+    return r.rows[0] || null;
   }
-  return { id: row.id };
+  return null;
 }
 
-async function findByUsername(table, username) {
-  const exact = await pool.query(
-    `SELECT * FROM ${table} WHERE username = $1 LIMIT 1`,
-    [username]
-  );
-  if (exact.rows[0]) return exact.rows[0];
-  const loose = await pool.query(
-    `SELECT * FROM ${table} WHERE LOWER(username) = LOWER($1) LIMIT 1`,
-    [username]
-  );
-  return loose.rows[0] || null;
+// Resolve an authenticated subject (client or staff) from the bearer token, without erroring.
+async function resolveBearerSubject(req) {
+  const token = bearerToken(req);
+  if (!token) return null;
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.pending || !decoded.jti) return null;
+    const role = decoded.role;
+    const id = role === 'client' ? decoded.userId : decoded.adminId;
+    if (!ROLE_TABLE[role] || !id) return null;
+    if (!(await isSessionValid(decoded.jti, role, id))) return null;
+    const account = await loadAccount(role, id);
+    if (!account) return null;
+    return { role, id, email: account.email, account };
+  } catch {
+    return null;
+  }
 }
 
-async function tryClientLogin(identifier, password) {
-  const email = identifier.trim().toLowerCase();
-  if (!email.includes('@')) return null;
-  const result = await pool.query(
-    'SELECT id, email, name, password_hash FROM "user" WHERE LOWER(email) = $1',
-    [email]
-  );
-  if (!result.rows[0]) return null;
-  const user = result.rows[0];
-  const ok = await bcrypt.compare(password, user.password_hash);
-  if (!ok) return { miss: true };
-  return {
-    hit: {
-      role: 'client',
-      token: generateToken(user.id),
-      user: { id: user.id, email: user.email, name: user.name }
-    }
-  };
+async function issueAndSendOtp(email, purpose) {
+  const issued = await issueOtp(email, purpose);
+  if (issued.error) return { throttled: issued.status === 429, error: issued.error, status: issued.status };
+  try {
+    await sendOtpMail(issued.email, issued.code, purpose);
+  } catch (mailError) {
+    console.error('OTP email failed:', mailError.message);
+    return { error: 'Could not send the verification email. Try again later.', status: 503 };
+  }
+  return { code: issued.code };
 }
 
-async function tryAdminLogin(identifier, password) {
-  const admin = await findByUsername('admin', identifier.trim());
-  if (!admin) return null;
-  const ok = await bcrypt.compare(password, admin.password_hash || '');
-  if (!ok) return { miss: true };
-  if (!admin.is_active) return { inactive: true };
-  return {
-    hit: {
-      role: 'admin',
-      token: generateAdminToken(admin.id, 'admin'),
-      user: {
-        id: admin.id,
-        username: admin.username,
-        name: admin.name,
-        email: admin.email,
-        role: 'admin'
-      }
-    }
-  };
+function devCodePayload(payload, code) {
+  if (process.env.NODE_ENV !== 'production' && code) {
+    payload.devCode = code;
+  }
+  return payload;
 }
 
-async function trySuperAdminLogin(identifier, password) {
-  const superAdmin = await findByUsername('super_admin', identifier.trim());
-  if (!superAdmin) return null;
-  const ok = await bcrypt.compare(password, superAdmin.password_hash || '');
-  if (!ok) return { miss: true };
-  return {
-    hit: {
-      role: 'super_admin',
-      token: generateAdminToken(superAdmin.id, 'super_admin'),
-      user: {
-        id: superAdmin.id,
-        username: superAdmin.username,
-        role: 'super_admin'
-      }
-    }
-  };
-}
+// ---------- OTP ----------
 
 router.post('/otp', otpLimiter, [
-  body('email').isEmail().withMessage('Enter a valid email address')
+  body('email').isEmail().withMessage('Enter a valid email address'),
+  body('purpose').optional({ values: 'falsy' }).isIn(OTP_PURPOSES).withMessage('Invalid code purpose'),
 ], async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: errors.array()[0]?.msg || 'Enter a valid email address' });
+    if (validationFailed(req, res)) return;
+
+    const purpose = req.body.purpose || 'signup';
+    let email = normalizeEmail(req.body.email);
+
+    if (purpose === 'signup') {
+      const existing = await pool.query(
+        'SELECT id FROM "user" WHERE LOWER(email) = $1 LIMIT 1',
+        [email]
+      );
+      if (existing.rows[0]) {
+        return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+      }
+    } else if (purpose === 'login') {
+      // Do not reveal whether an account exists: respond identically either way.
+      const client = await findClientByEmail(email);
+      const staff = client ? null : (await findStaff('admin', email)) || (await findStaff('super_admin', email));
+      const account = client || staff;
+      const generic = { message: 'If an account exists for this email, we sent a 6-digit code.' };
+      if (!account || (staff && staff.is_active === false)) {
+        return res.json(generic);
+      }
+      const sent = await issueAndSendOtp(email, 'login');
+      if (sent.error && !sent.throttled) {
+        return res.status(sent.status || 503).json({ error: sent.error });
+      }
+      return res.json(devCodePayload(generic, sent.code));
+    } else {
+      // sensitive: only for the signed-in account, and only to its own email address
+      const subject = await resolveBearerSubject(req);
+      if (!subject) {
+        return res.status(401).json({ error: 'Sign in to request a security code' });
+      }
+      if (!subject.email) {
+        return res.status(400).json({ error: 'No email address is on file for this account' });
+      }
+      if (email !== normalizeEmail(subject.email)) {
+        return res.status(403).json({ error: 'Codes can only be sent to your own email address' });
+      }
+      email = normalizeEmail(subject.email);
     }
 
-    const email = normalizeEmail(req.body.email);
-    const existing = await pool.query(
-      'SELECT id FROM "user" WHERE LOWER(email) = $1 LIMIT 1',
-      [email]
-    );
-    if (existing.rows[0]) {
-      return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
+    const sent = await issueAndSendOtp(email, purpose);
+    if (sent.error) {
+      return res.status(sent.status || 503).json({ error: sent.error });
     }
 
-    const latest = await pool.query(
-      `SELECT created_at FROM email_otp
-       WHERE email = $1 AND purpose = $2
-       ORDER BY created_at DESC LIMIT 1`,
-      [email, OTP_PURPOSE]
-    );
-    const lastSent = latest.rows[0]?.created_at ? new Date(latest.rows[0].created_at).getTime() : 0;
-    if (lastSent && Date.now() - lastSent < OTP_RESEND_MS) {
-      return res.status(429).json({ error: 'Wait a moment before requesting another code.' });
-    }
-
-    const code = String(crypto.randomInt(100000, 1000000));
-    await pool.query(
-      `UPDATE email_otp SET consumed_at = NOW()
-       WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL`,
-      [email, OTP_PURPOSE]
-    );
-    await pool.query(
-      `INSERT INTO email_otp (email, code_hash, purpose, expires_at)
-       VALUES ($1, $2, $3, $4)`,
-      [email, hashOtp(email, code), OTP_PURPOSE, new Date(Date.now() + OTP_TTL_MS)]
-    );
-
-    try {
-      await sendMail({
-        to: email,
-        subject: 'Your LifeMap sign-up code',
-        text: `Your LifeMap verification code is ${code}. It expires in 10 minutes.\n\nIf you did not request this, you can ignore this email.`,
-        html: `<p>Your LifeMap verification code is <strong>${code}</strong>.</p><p>It expires in 10 minutes. If you did not request this, you can ignore this email.</p>`,
-      });
-    } catch (mailError) {
-      console.error('OTP email failed:', mailError);
-      return res.status(503).json({ error: 'Could not send the verification email. Try again later.' });
-    }
-
-    const payload = { message: 'We sent a 6-digit code to your email.' };
-    if (process.env.NODE_ENV !== 'production') {
-      payload.devCode = code;
-      console.log(`[otp] ${email} → ${code}`);
-    }
-    return res.json(payload);
+    return res.json(devCodePayload({ message: 'We sent a 6-digit code to your email.' }, sent.code));
   } catch (error) {
     console.error('OTP request error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.post('/register', [
+// ---------- Register ----------
+
+router.post('/register', registerLimiter, [
   body('email').isEmail().withMessage('Enter a valid email address'),
   body('name').trim().isLength({ min: 2 }).withMessage('Enter your name'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  strongPassword('password'),
   body('otp').optional(),
-  body('code').optional()
+  body('code').optional(),
+  body('consentAccepted')
+    .custom((value) => value === true || value === 'true')
+    .withMessage('You must accept the Privacy Notice to create an account'),
 ], async (req, res) => {
   const client = await pool.connect();
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: errors.array()[0]?.msg || 'Validation failed' });
-    }
+    if (validationFailed(req, res)) return;
 
     const email = normalizeEmail(req.body.email);
     const name = String(req.body.name || '').trim();
     const password = String(req.body.password || '');
     const code = String(req.body.otp || req.body.code || '').replace(/\s+/g, '');
-    if (!/^\d{6}$/.test(code)) {
-      return res.status(400).json({ error: 'Enter the 6-digit code we emailed you' });
-    }
-
-    const otp = await consumeValidOtp(email, code);
-    if (otp.error) {
-      return res.status(otp.status).json({ error: otp.error });
-    }
 
     const existing = await client.query(
       'SELECT id FROM "user" WHERE LOWER(email) = $1 LIMIT 1',
@@ -235,13 +299,19 @@ router.post('/register', [
       return res.status(409).json({ error: 'An account with this email already exists. Sign in instead.' });
     }
 
+    const otp = await consumeOtp(email, 'signup', code);
+    if (otp.error) {
+      return res.status(otp.status || 400).json({ error: otp.error });
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
     await client.query('BEGIN');
     const userResult = await client.query(
-      `INSERT INTO "user" (email, password_hash, name, admin_id, created_at)
-       VALUES ($1, $2, $3, NULL, NOW())
+      `INSERT INTO "user"
+         (email, password_hash, name, admin_id, consent_version, consent_at, last_login_at, created_at)
+       VALUES ($1, $2, $3, NULL, $4, NOW(), NOW(), NOW())
        RETURNING id, email, name, created_at`,
-      [email, passwordHash, name]
+      [email, passwordHash, name, PRIVACY_NOTICE_VERSION]
     );
     const user = userResult.rows[0];
     await client.query(
@@ -250,14 +320,26 @@ router.post('/register', [
        VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
       [user.id, 32, 85, 0.08, 0.11, 0.06]
     );
-    await client.query('UPDATE email_otp SET consumed_at = NOW() WHERE id = $1', [otp.id]);
     await client.query('COMMIT');
+
+    const jti = newJti();
+    await createSession({ role: 'client', subjectId: user.id, jti, ...clientMeta(req) });
+
+    await logActivity({
+      actorRole: 'client',
+      actorId: user.id,
+      actorLabel: user.email,
+      action: 'client_signup',
+      targetType: 'user',
+      targetId: user.id,
+      meta: { consentVersion: PRIVACY_NOTICE_VERSION },
+    });
 
     return res.status(201).json({
       message: 'Account created',
       role: 'client',
-      token: generateToken(user.id),
-      user: { id: user.id, email: user.email, name: user.name }
+      token: generateToken(user.id, jti),
+      user: { id: user.id, email: user.email, name: user.name },
     });
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch { /* ignore */ }
@@ -271,61 +353,435 @@ router.post('/register', [
   }
 });
 
-// Unified login: client (email), advisor (username), or super admin (username)
-router.post('/login', [
-  body('password').notEmpty()
+// ---------- Login (password step -> OTP step) ----------
+
+function signPending(role, id) {
+  return jwt.sign({ pending: true, role, id }, process.env.JWT_SECRET, { expiresIn: PENDING_TOKEN_TTL });
+}
+
+router.post('/login', loginLimiter, [
+  body('password').notEmpty().withMessage('Enter your password'),
 ], async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: 'Validation failed', details: errors.array() });
-    }
+    if (validationFailed(req, res)) return;
 
     const identifier = String(req.body.identifier || req.body.email || req.body.username || '').trim();
-    const { password } = req.body;
+    const password = String(req.body.password || '');
     if (!identifier) {
       return res.status(400).json({ error: 'Enter your email or username' });
     }
 
-    const order = identifier.includes('@')
-      ? [tryClientLogin, tryAdminLogin, trySuperAdminLogin]
-      : [tryAdminLogin, trySuperAdminLogin, tryClientLogin];
+    const candidates = identifier.includes('@')
+      ? [
+          { role: 'client', find: () => findClientByEmail(identifier) },
+          { role: 'admin', find: () => findStaff('admin', identifier) },
+          { role: 'super_admin', find: () => findStaff('super_admin', identifier) },
+        ]
+      : [
+          { role: 'admin', find: () => findStaff('admin', identifier) },
+          { role: 'super_admin', find: () => findStaff('super_admin', identifier) },
+        ];
 
-    for (const attempt of order) {
-      const result = await attempt(identifier, password);
-      if (!result) continue;
-      if (result.inactive) {
+    let matched = false;
+    let lockedHit = false;
+    let success = null;
+
+    for (const candidate of candidates) {
+      const account = await candidate.find();
+      if (!account) continue;
+      matched = true;
+
+      if (isLocked(account)) {
+        lockedHit = true;
+        continue;
+      }
+
+      const ok = await bcrypt.compare(password, account.password_hash || '');
+      if (!ok) {
+        const failure = await registerFailure(ROLE_TABLE[candidate.role], account.id);
+        if (failure && isLocked(failure)) {
+          lockedHit = true;
+          await logActivity({
+            actorRole: candidate.role,
+            actorId: account.id,
+            actorLabel: actorLabel(candidate.role, account),
+            action: 'account_locked',
+            targetType: candidate.role === 'client' ? 'user' : candidate.role,
+            targetId: account.id,
+            teamAdminId: teamAdminFor(candidate.role, account),
+            meta: { failedAttempts: failure.failed_attempts },
+          });
+          if (candidate.role !== 'client') {
+            await alertSuperAdmins(
+              'LifeMap security alert: staff account locked',
+              `The ${candidate.role === 'admin' ? 'admin' : 'super admin'} account "${account.username}" was locked after ${MAX_FAILED_ATTEMPTS} failed sign-in attempts (IP ${req.ip || 'unknown'}).`
+            );
+          }
+        }
+        continue;
+      }
+
+      if (candidate.role === 'admin' && !account.is_active) {
         return res.status(403).json({ error: 'Admin account is inactive. Please contact super admin to activate your account.' });
       }
-      if (result.hit) {
-        return res.json({
-          message: 'Login successful',
-          role: result.hit.role,
-          user: result.hit.user,
-          token: result.hit.token
-        });
-      }
+
+      success = { role: candidate.role, account };
+      break;
     }
 
-    return res.status(401).json({ error: 'Invalid credentials' });
+    if (!success) {
+      if (!matched) {
+        await bcrypt.compare(password, DUMMY_HASH);
+      }
+      if (lockedHit) {
+        return res.status(429).json({
+          error: `Too many failed attempts. Try again in ${Math.round(LOCKOUT_MS / 60000)} minutes.`,
+        });
+      }
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const { role, account } = success;
+    if (!account.email) {
+      return res.status(403).json({
+        error: 'No email address is on file for this account. Contact your super admin.',
+      });
+    }
+
+    const sent = await issueAndSendOtp(account.email, 'login');
+    if (sent.error && !sent.throttled) {
+      return res.status(sent.status || 503).json({ error: sent.error });
+    }
+
+    return res.json(devCodePayload({
+      message: 'Enter the 6-digit code we emailed you to finish signing in.',
+      requiresOtp: true,
+      role,
+      challengeEmail: maskEmail(account.email),
+      pendingToken: signPending(role, account.id),
+    }, sent.code));
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Logout endpoint
-router.post('/logout', authenticateToken, (req, res) => {
-  // In a stateless JWT system, logout is handled client-side
-  // You could implement a token blacklist here if needed
-  res.json({ message: 'Logout successful' });
+function readPending(pendingToken) {
+  try {
+    const decoded = jwt.verify(String(pendingToken || ''), process.env.JWT_SECRET);
+    if (!decoded.pending || !ROLE_TABLE[decoded.role] || !decoded.id) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+router.post('/login/resend', resendLimiter, [
+  body('pendingToken').notEmpty(),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+    const pending = readPending(req.body.pendingToken);
+    if (!pending) {
+      return res.status(401).json({ error: 'Your sign-in session expired. Enter your password again.' });
+    }
+    const account = await loadAccount(pending.role, pending.id);
+    if (!account || !account.email || (pending.role === 'admin' && !account.is_active)) {
+      return res.status(401).json({ error: 'Your sign-in session expired. Enter your password again.' });
+    }
+    const sent = await issueAndSendOtp(account.email, 'login');
+    if (sent.error) {
+      return res.status(sent.status || 503).json({ error: sent.error });
+    }
+    return res.json(devCodePayload({ message: 'We sent a new 6-digit code to your email.' }, sent.code));
+  } catch (error) {
+    console.error('Login resend error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-// Get user profile
+router.post('/login/verify', verifyLimiter, [
+  body('pendingToken').notEmpty().withMessage('Sign-in session missing'),
+  body('otp').notEmpty().withMessage('Enter the 6-digit code we emailed you'),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+
+    const pending = readPending(req.body.pendingToken);
+    if (!pending) {
+      return res.status(401).json({ error: 'Your sign-in session expired. Enter your password again.' });
+    }
+
+    const account = await loadAccount(pending.role, pending.id);
+    if (!account) {
+      return res.status(401).json({ error: 'Account not found' });
+    }
+    if (pending.role === 'admin' && !account.is_active) {
+      return res.status(403).json({ error: 'Admin account is inactive. Please contact super admin to activate your account.' });
+    }
+    if (isLocked(account)) {
+      return res.status(429).json({ error: 'Account temporarily locked. Try again later.' });
+    }
+    if (!account.email) {
+      return res.status(403).json({ error: 'No email address is on file for this account.' });
+    }
+
+    const otp = await consumeOtp(account.email, 'login', req.body.otp);
+    if (otp.error) {
+      return res.status(otp.status || 400).json({ error: otp.error });
+    }
+
+    await clearFailures(ROLE_TABLE[pending.role], account.id);
+
+    const jti = newJti();
+    await createSession({ role: pending.role, subjectId: account.id, jti, ...clientMeta(req) });
+
+    await logActivity({
+      actorRole: pending.role,
+      actorId: account.id,
+      actorLabel: actorLabel(pending.role, account),
+      action: 'login',
+      targetType: pending.role === 'client' ? 'user' : pending.role,
+      targetId: account.id,
+      teamAdminId: teamAdminFor(pending.role, account),
+      meta: { ip: req.ip || null },
+    });
+
+    const token = pending.role === 'client'
+      ? generateToken(account.id, jti)
+      : generateAdminToken(account.id, pending.role, jti);
+
+    return res.json({
+      message: 'Login successful',
+      role: pending.role,
+      user: publicUser(pending.role, account),
+      token,
+    });
+  } catch (error) {
+    console.error('Login verify error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ---------- Password reset ----------
+
+const FORGOT_MESSAGE = 'If an account matches, we have emailed a reset link. It expires in 15 minutes.';
+
+router.post('/forgot-password', forgotLimiter, [
+  body('emailOrUsername').trim().notEmpty().withMessage('Enter your email or username'),
+], async (req, res) => {
+  if (validationFailed(req, res)) return;
+
+  // Always the same response, sent before any lookup work so timing does not leak account existence.
+  res.json({ message: FORGOT_MESSAGE });
+
+  try {
+    const identifier = String(req.body.emailOrUsername || '').trim();
+    let found = null;
+
+    if (identifier.includes('@')) {
+      const client = await findClientByEmail(identifier);
+      if (client) found = { role: 'client', account: client };
+    }
+    if (!found) {
+      const admin = await findStaff('admin', identifier);
+      if (admin) found = { role: 'admin', account: admin };
+    }
+    if (!found) {
+      const superAdmin = await findStaff('super_admin', identifier);
+      if (superAdmin) found = { role: 'super_admin', account: superAdmin };
+    }
+    if (!found || !found.account.email) return;
+
+    const { role, account } = found;
+    const token = await createResetOrInviteToken({
+      role,
+      subjectId: account.id,
+      email: account.email,
+      purpose: 'reset',
+      ttlMs: RESET_TTL_MS,
+    });
+    const link = resetLink(token, 'reset');
+    await notifyEmail(
+      account.email,
+      'Reset your LifeMap password',
+      `We received a request to reset your LifeMap password.\n\nUse this link within 15 minutes:\n${link}\n\nIf you did not request this, ignore this email; your password will not change.`
+    );
+    await logActivity({
+      actorRole: role,
+      actorId: account.id,
+      actorLabel: actorLabel(role, account),
+      action: 'password_reset_requested',
+      targetType: role === 'client' ? 'user' : role,
+      targetId: account.id,
+      teamAdminId: teamAdminFor(role, account),
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+  }
+});
+
+router.post('/reset-password', resetLimiter, [
+  body('token').isString().notEmpty().withMessage('Reset link is missing'),
+  strongPassword('password'),
+], async (req, res) => {
+  try {
+    // Validate the password first so a weak password does not burn the one-time link.
+    if (validationFailed(req, res)) return;
+
+    const consumed = await consumeResetToken(String(req.body.token), ['reset', 'invite']);
+    if (consumed.error) {
+      return res.status(consumed.status || 400).json({ error: consumed.error });
+    }
+    const tokenRow = consumed.row;
+    const role = tokenRow.role;
+    const account = await loadAccount(role, tokenRow.subject_id);
+    if (!account) {
+      return res.status(400).json({ error: 'This link is invalid or already used' });
+    }
+
+    const passwordHash = await bcrypt.hash(String(req.body.password), 12);
+    await pool.query(
+      `UPDATE ${ROLE_TABLE[role]}
+       SET password_hash = $1, failed_attempts = 0, locked_until = NULL, updated_at = NOW()
+       WHERE id = $2`,
+      [passwordHash, account.id]
+    );
+    await revokeAllSessions(role, account.id);
+
+    const wasInvite = tokenRow.purpose === 'invite';
+    await notifyEmail(
+      account.email || tokenRow.email,
+      wasInvite ? 'Your LifeMap password was set' : 'Your LifeMap password was changed',
+      `The password for your LifeMap account was just ${wasInvite ? 'set' : 'changed'}. All existing sessions were signed out.\n\nIf this was not you, contact ${PRIVACY_CONTACT} immediately.`
+    );
+    await logActivity({
+      actorRole: role,
+      actorId: account.id,
+      actorLabel: actorLabel(role, account),
+      action: wasInvite ? 'invite_accepted' : 'password_reset',
+      targetType: role === 'client' ? 'user' : role,
+      targetId: account.id,
+      teamAdminId: teamAdminFor(role, account),
+    });
+
+    return res.json({
+      message: wasInvite ? 'Password set. You can sign in now.' : 'Password updated. Sign in with your new password.',
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/change-password', sensitiveLimiter, authenticateToken, [
+  body('currentPassword').notEmpty().withMessage('Enter your current password'),
+  strongPassword('newPassword'),
+  body('otp').notEmpty().withMessage('Enter the 6-digit code we emailed you'),
+], async (req, res) => {
+  try {
+    if (validationFailed(req, res)) return;
+
+    const { currentPassword, newPassword, otp } = req.body;
+
+    const result = await pool.query(
+      'SELECT id, email, password_hash, admin_id FROM "user" WHERE id = $1 AND deleted_at IS NULL',
+      [req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const user = result.rows[0];
+
+    const isValidPassword = await bcrypt.compare(String(currentPassword), user.password_hash);
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const code = await consumeOtp(user.email, 'sensitive', otp);
+    if (code.error) {
+      return res.status(code.status || 400).json({ error: code.error });
+    }
+
+    const hashedPassword = await bcrypt.hash(String(newPassword), 12);
+    await pool.query(
+      'UPDATE "user" SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+      [hashedPassword, user.id]
+    );
+    await revokeAllSessions('client', user.id);
+
+    await notifyEmail(
+      user.email,
+      'Your LifeMap password was changed',
+      `Your LifeMap password was just changed and all devices were signed out.\n\nIf this was not you, reset your password right away and contact ${PRIVACY_CONTACT}.`
+    );
+    await logActivity({
+      actorRole: 'client',
+      actorId: user.id,
+      actorLabel: user.email,
+      action: 'password_changed',
+      targetType: 'user',
+      targetId: user.id,
+      teamAdminId: user.admin_id || null,
+    });
+
+    res.json({ message: 'Password changed successfully. Please sign in again.', reauthRequired: true });
+  } catch (error) {
+    console.error('Password change error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ---------- Session management ----------
+
+router.post('/logout', async (req, res) => {
+  try {
+    const token = bearerToken(req);
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: true });
+        if (decoded.jti) {
+          await pool.query(
+            'UPDATE auth_session SET revoked_at = NOW() WHERE jti = $1 AND revoked_at IS NULL',
+            [decoded.jti]
+          );
+        }
+      } catch {
+        // invalid token: nothing to revoke
+      }
+    }
+    res.json({ message: 'Logout successful' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/sessions/revoke-all', authenticateToken, async (req, res) => {
+  try {
+    await revokeAllSessions('client', req.user.id);
+    await logActivity({
+      actorRole: 'client',
+      actorId: req.user.id,
+      actorLabel: req.user.email,
+      action: 'sessions_revoked_all',
+      targetType: 'user',
+      targetId: req.user.id,
+    });
+    res.json({ message: 'Signed out of all devices', reauthRequired: true });
+  } catch (error) {
+    console.error('Revoke sessions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ---------- Profile ----------
+
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, email, name, created_at FROM "user" WHERE id = $1',
+      `SELECT id, email, name, created_at, consent_version, consent_at, last_login_at
+       FROM "user" WHERE id = $1 AND deleted_at IS NULL`,
       [req.user.id]
     );
 
@@ -334,13 +790,16 @@ router.get('/profile', authenticateToken, async (req, res) => {
     }
 
     const user = result.rows[0];
-    res.json({ 
+    res.json({
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        created_at: user.created_at
-      }
+        created_at: user.created_at,
+        consent_version: user.consent_version,
+        consent_at: user.consent_at,
+        last_login_at: user.last_login_at,
+      },
     });
   } catch (error) {
     console.error('Profile fetch error:', error);
@@ -348,52 +807,94 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// Update user profile
-router.put('/profile', authenticateToken, [
+router.put('/profile', sensitiveLimiter, authenticateToken, [
   body('name').optional().trim().isLength({ min: 2 }),
-  body('email').optional().isEmail().withMessage('Please provide a valid email address')
+  body('email').optional().isEmail().withMessage('Please provide a valid email address'),
+  body('currentPassword').optional(),
+  body('otp').optional(),
 ], async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+    if (validationFailed(req, res)) return;
+
+    const current = await pool.query(
+      'SELECT id, email, name, password_hash, admin_id FROM "user" WHERE id = $1 AND deleted_at IS NULL',
+      [req.user.id]
+    );
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
     }
+    const existing = current.rows[0];
 
-    const { name, email } = req.body;
-    const updates = [];
-    const values = [];
-    let paramCount = 1;
+    const name = req.body.name ? String(req.body.name).trim() : undefined;
+    const newEmail = req.body.email ? normalizeEmail(req.body.email) : undefined;
+    const emailChanging = Boolean(newEmail) && newEmail !== normalizeEmail(existing.email);
 
-    if (name) {
-      updates.push(`name = $${paramCount++}`);
-      values.push(name);
-    }
-
-    if (email) {
-      // Check if email is already taken by another user
-      const existingUser = await pool.query(
-        'SELECT id FROM "user" WHERE email = $1 AND id != $2',
-        [email, req.user.id]
-      );
-
-      if (existingUser.rows.length > 0) {
-        return res.status(400).json({ error: 'Email already taken' });
-      }
-
-      updates.push(`email = $${paramCount++}`);
-      values.push(email);
-    }
-
-    if (updates.length === 0) {
+    if (name === undefined && !emailChanging) {
       return res.status(400).json({ error: 'No valid fields to update' });
     }
 
-    values.push(req.user.id);
-    const query = `UPDATE "user" SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramCount} RETURNING id, email, name, created_at, updated_at`;
+    if (emailChanging) {
+      if (!req.body.currentPassword || !req.body.otp) {
+        return res.status(400).json({
+          error: 'Changing your email requires your current password and a security code',
+          requires: ['currentPassword', 'otp'],
+        });
+      }
+      const ok = await bcrypt.compare(String(req.body.currentPassword), existing.password_hash);
+      if (!ok) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+      const taken = await pool.query(
+        'SELECT id FROM "user" WHERE LOWER(email) = $1 AND id != $2',
+        [newEmail, existing.id]
+      );
+      if (taken.rows.length > 0) {
+        return res.status(400).json({ error: 'Email already taken' });
+      }
+      const code = await consumeOtp(existing.email, 'sensitive', req.body.otp);
+      if (code.error) {
+        return res.status(code.status || 400).json({ error: code.error });
+      }
+    }
 
-    const result = await pool.query(query, values);
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+    if (name !== undefined) {
+      updates.push(`name = $${paramCount++}`);
+      values.push(name);
+    }
+    if (emailChanging) {
+      updates.push(`email = $${paramCount++}`);
+      values.push(newEmail);
+    }
+    values.push(existing.id);
 
+    const result = await pool.query(
+      `UPDATE "user" SET ${updates.join(', ')}, updated_at = NOW()
+       WHERE id = $${paramCount} RETURNING id, email, name, created_at, updated_at`,
+      values
+    );
     const user = result.rows[0];
+
+    if (emailChanging) {
+      await notifyEmail(
+        existing.email,
+        'Your LifeMap email address was changed',
+        `The email address on your LifeMap account was changed to ${maskEmail(newEmail)}.\n\nIf this was not you, contact ${PRIVACY_CONTACT} immediately.`
+      );
+      await logActivity({
+        actorRole: 'client',
+        actorId: existing.id,
+        actorLabel: newEmail,
+        action: 'profile_email_changed',
+        targetType: 'user',
+        targetId: existing.id,
+        teamAdminId: existing.admin_id || null,
+        meta: { from: maskEmail(existing.email), to: maskEmail(newEmail) },
+      });
+    }
+
     res.json({
       message: 'Profile updated successfully',
       user: {
@@ -401,81 +902,105 @@ router.put('/profile', authenticateToken, [
         email: user.email,
         name: user.name,
         created_at: user.created_at,
-        updated_at: user.updated_at
-      }
+        updated_at: user.updated_at,
+      },
     });
   } catch (error) {
     console.error('Profile update error:', error);
-    
-    // Handle specific database constraint violations
-    if (error.code === '23505') { // Unique constraint violation
-      if (error.constraint === 'user_email_key') {
-        return res.status(400).json({ error: 'Email already exists. Please use a different email address.' });
-      } else {
-        return res.status(400).json({ error: 'This information is already in use. Please check your details and try again.' });
-      }
-    } else if (error.code === '23503') { // Foreign key constraint violation
+
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Email already exists. Please use a different email address.' });
+    } else if (error.code === '23503') {
       return res.status(400).json({ error: 'Invalid data provided. Please check your information.' });
-    } else if (error.code === '23514') { // Check constraint violation
+    } else if (error.code === '23514') {
       return res.status(400).json({ error: 'Invalid data format. Please check your input.' });
     }
-    
+
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Change password
-router.post('/change-password', authenticateToken, [
-  body('currentPassword').notEmpty(),
-  body('newPassword').isLength({ min: 6 })
+// ---------- Privacy (DPDP) ----------
+
+router.get('/privacy-meta', (req, res) => {
+  res.json({
+    version: PRIVACY_NOTICE_VERSION,
+    contact: PRIVACY_CONTACT,
+    privacyUrl: `${APP_BASE_URL}/privacy`,
+    termsUrl: `${APP_BASE_URL}/terms`,
+  });
+});
+
+router.post('/privacy-requests', privacyLimiter, authenticateToken, [
+  body('type').isIn(PRIVACY_REQUEST_TYPES).withMessage('Choose a valid request type'),
+  body('details').optional({ values: 'falsy' }).isString().trim().isLength({ max: 2000 })
+    .withMessage('Details must be 2000 characters or fewer'),
 ], async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: 'Validation failed', details: errors.array() });
+    if (validationFailed(req, res)) return;
+
+    const type = req.body.type;
+    const details = req.body.details ? String(req.body.details).trim() : '';
+    if (type !== 'withdraw_consent' && details.length < 3) {
+      return res.status(400).json({ error: 'Please describe your request' });
     }
 
-    const { currentPassword, newPassword } = req.body;
-
-    // Get current password hash
-    const result = await pool.query(
-      'SELECT password_hash FROM "user" WHERE id = $1',
+    const owner = await pool.query(
+      'SELECT admin_id FROM "user" WHERE id = $1 AND deleted_at IS NULL',
       [req.user.id]
     );
+    const teamAdminId = owner.rows[0]?.admin_id || null;
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    const ref = newPrivacyRef();
+    const dueAt = new Date(Date.now() + PRIVACY_RESPONSE_DAYS * 24 * 60 * 60 * 1000);
+    const result = await pool.query(
+      `INSERT INTO privacy_request (ref, user_id, type, details, due_at)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, ref, type, status, details, due_at, created_at`,
+      [ref, req.user.id, type, details || null, dueAt]
+    );
+    const request = result.rows[0];
 
-    // Verify current password
-    const isValidPassword = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
-    if (!isValidPassword) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
-    }
+    await logActivity({
+      actorRole: 'client',
+      actorId: req.user.id,
+      actorLabel: req.user.email,
+      action: 'privacy_request_created',
+      targetType: 'privacy_request',
+      targetId: request.id,
+      teamAdminId,
+      meta: { ref, type },
+    });
 
-    // Hash new password
-    const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    // Update password
-    await pool.query(
-      'UPDATE "user" SET password_hash = $1, updated_at = NOW() WHERE id = $2',
-      [hashedPassword, req.user.id]
+    const dueText = dueAt.toISOString().slice(0, 10);
+    await notifyEmail(
+      req.user.email,
+      `LifeMap privacy request received (${ref})`,
+      `We received your ${type.replace(/_/g, ' ')} request.\n\nReference: ${ref}\nWe will respond by ${dueText}.\n\nQuestions: ${PRIVACY_CONTACT}`
+    );
+    await notifyEmail(
+      PRIVACY_CONTACT,
+      `New privacy request ${ref}`,
+      `A ${type.replace(/_/g, ' ')} request (${ref}) was submitted. Review it in the admin console. Due ${dueText}.`
     );
 
-    res.json({ message: 'Password changed successfully' });
+    res.status(201).json({ message: 'Request received', request });
   } catch (error) {
-    console.error('Password change error:', error);
-    
-    // Handle specific database errors
-    if (error.code === '23505') { // Unique constraint violation
-      return res.status(400).json({ error: 'Password update failed due to data conflict.' });
-    } else if (error.code === '23503') { // Foreign key constraint violation
-      return res.status(400).json({ error: 'Invalid user account.' });
-    } else if (error.code === '23514') { // Check constraint violation
-      return res.status(400).json({ error: 'Password does not meet requirements.' });
-    }
-    
+    console.error('Privacy request error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/privacy-requests', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, ref, type, status, details, due_at, closed_at, created_at, updated_at
+       FROM privacy_request WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.user.id]
+    );
+    res.json({ requests: result.rows });
+  } catch (error) {
+    console.error('Privacy requests list error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

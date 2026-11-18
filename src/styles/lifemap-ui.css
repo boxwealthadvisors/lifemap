@@ -1118,3 +1118,54 @@
   border-radius: 12px;
   box-shadow: 0 20px 48px rgba(10, 31, 68, 0.16);
 }
+
+/* ---- Privacy, legal pages and admin console sections ---- */
+@media (max-width: 640px) {
+  /* in-card text links must stay visible on phones (only the topbar ones are hidden) */
+  .lm-modal .lm-tlink,
+  .lm-gate .lm-tlink,
+  .lm-card .lm-tlink,
+  .lm-body .lm-tlink { display: inline-block; }
+}
+textarea.lm-inp { min-height: 90px; resize: vertical; font-family: inherit; }
+.lm-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  background: var(--lm-paper);
+  border: 1px solid var(--lm-line);
+  border-radius: 10px;
+  padding: 3px;
+  margin-bottom: 16px;
+  width: fit-content;
+  max-width: 100%;
+}
+.lm-tabs button {
+  border: 0;
+  background: none;
+  padding: 8px 14px;
+  font-size: 13.5px;
+  border-radius: 8px;
+  color: var(--lm-muted);
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+}
+.lm-tabs button:hover { background: #eef3fa; color: var(--lm-navy); }
+.lm-tabs button.on { background: var(--lm-navy); color: #fff; }
+.lm-legal {
+  max-width: 780px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid var(--lm-line);
+  border-radius: 14px;
+  padding: 26px 28px;
+  line-height: 1.6;
+}
+.lm-legal h2 { font-size: 17px; margin: 22px 0 6px; }
+.lm-legal p, .lm-legal li { font-size: 14.5px; color: var(--lm-ink); }
+.lm-legal .lm-legal-meta { font-size: 13px; color: var(--lm-muted); }
+.lm-inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.lm-inline-form .lm-inp { width: auto; min-width: 140px; }
+.lm-hint { margin: 6px 0 0; font-size: 13px; color: var(--lm-muted); }
+.lm-badge.warn { background: #fff6e6; color: #a8620a; }

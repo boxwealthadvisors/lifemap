@@ -1,6 +1,18 @@
 // API service for Life Sheet backend integration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:10000/api';
 
+// Endpoints that must never send a bearer token
+const AUTH_ENDPOINT_RE = /^\/(otp|login|register|forgot-password|reset-password|login\/verify|login\/resend)$/;
+
+function toQuery(params = {}) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') qs.set(key, String(value));
+  });
+  const text = qs.toString();
+  return text ? `?${text}` : '';
+}
+
 class ApiService {
   constructor() {
     this.baseURL = API_BASE_URL;
@@ -29,7 +41,12 @@ class ApiService {
     const userToken = localStorage.getItem('authToken');
     // For admin endpoints, prioritize admin token; for regular endpoints, use user token
     const isAdminEndpoint = endpoint.includes('/admin/');
-    const isAuthEndpoint = /\/login$|\/register$|\/otp$/.test(endpoint);
+    // Public auth endpoints never carry a bearer token. The one exception is a "sensitive"
+    // OTP request, which the backend only issues to the signed-in account's own email.
+    const path = endpoint.split('?')[0];
+    const sensitiveOtp = path === '/otp' && options.body && typeof options.body === 'object'
+      && options.body.purpose === 'sensitive';
+    const isAuthEndpoint = AUTH_ENDPOINT_RE.test(path) && !sensitiveOtp;
     const token = isAdminEndpoint ? (adminToken || userToken) : (userToken || adminToken);
     
     const controller = new AbortController();
@@ -69,7 +86,7 @@ class ApiService {
         if (!response.ok) {
           const errorText = await response.text().catch(() => '');
           // If token is invalid, clear it (but only if it's actually an auth error, not a user not found error)
-          if (response.status === 401 || response.status === 403) {
+          if (!isAuthEndpoint && (response.status === 401 || response.status === 403)) {
             // Only clear tokens if the error message indicates authentication failure
             // Don't clear if it's a "User not found" or similar error
             const errorLower = errorText.toLowerCase();
@@ -131,9 +148,61 @@ class ApiService {
     });
   }
 
+  // Step 2 of sign-in: { pendingToken, otp } -> { token, role, user }
+  async verifyLogin({ pendingToken, otp }) {
+    return this.request('/login/verify', {
+      method: 'POST',
+      body: { pendingToken, otp },
+    });
+  }
+
+  async resendLoginOtp(pendingToken) {
+    return this.request('/login/resend', {
+      method: 'POST',
+      body: { pendingToken },
+    });
+  }
+
+  async forgotPassword(emailOrUsername) {
+    return this.request('/forgot-password', {
+      method: 'POST',
+      body: { emailOrUsername },
+    });
+  }
+
+  async resetPassword({ token, password }) {
+    return this.request('/reset-password', {
+      method: 'POST',
+      body: { token, password },
+    });
+  }
+
   async logout() {
     return this.request('/logout', {
       method: 'POST',
+    });
+  }
+
+  async revokeAllSessions() {
+    return this.request('/sessions/revoke-all', {
+      method: 'POST',
+    });
+  }
+
+  // ==================== PRIVACY (DPDP) ====================
+
+  async getPrivacyMeta() {
+    return this.request('/privacy-meta');
+  }
+
+  async listPrivacyRequests() {
+    return this.request('/privacy-requests');
+  }
+
+  async createPrivacyRequest({ type, details }) {
+    return this.request('/privacy-requests', {
+      method: 'POST',
+      body: { type, details },
     });
   }
 
@@ -566,22 +635,102 @@ class ApiService {
     });
   }
 
-  async deleteAdmin(adminId) {
+  // Soft delete (recoverable for 90 days). Clients must be reassigned first.
+  async deleteAdmin(adminId, { reassignToAdminId, reason } = {}) {
     return this.request(`/admin/super-admin/admins/${adminId}`, {
       method: 'DELETE',
+      body: { reassignToAdminId: reassignToAdminId || undefined, reason: reason || undefined },
+    });
+  }
+
+  async deactivateAdmin(adminId, { reassignToAdminId, reason } = {}) {
+    return this.request(`/admin/super-admin/admins/${adminId}/deactivate`, {
+      method: 'POST',
+      body: { reassignToAdminId: reassignToAdminId || undefined, reason: reason || undefined },
+    });
+  }
+
+  // Emails an invite (first time) or reset link to an admin
+  async sendAdminReset(adminId) {
+    return this.request(`/admin/admins/${adminId}/send-reset`, {
+      method: 'POST',
+    });
+  }
+
+  // Emails an invite (first time) or reset link to a client
+  async sendUserReset(userId) {
+    return this.request(`/admin/users/${userId}/send-reset`, {
+      method: 'POST',
     });
   }
 
   // Super Admin - User Management
-  async getAllUsers() {
-    return this.request('/admin/super-admin/users');
+  async getAllUsers({ unassigned } = {}) {
+    return this.request(`/admin/super-admin/users${unassigned ? '?unassigned=true' : ''}`);
   }
 
-  async transferUser(userId, adminId) {
+  async transferUser(userId, adminId, reason) {
     return this.request(`/admin/super-admin/users/${userId}/transfer`, {
       method: 'PUT',
-      body: { admin_id: adminId },
+      body: { admin_id: adminId, reason },
     });
+  }
+
+  // ==================== ACTIVITY LOG / RECYCLE BIN / PRIVACY (staff) ====================
+
+  async getActivityLog(params = {}) {
+    return this.request(`/admin/activity-log${toQuery(params)}`);
+  }
+
+  // Returns { blob, filename } so the caller can trigger a download
+  async exportActivityLog(params = {}) {
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('authToken');
+    const response = await fetch(`${this.baseURL}/admin/activity-log/export.csv${toQuery(params)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      let message = `Export failed (${response.status})`;
+      try {
+        const parsed = JSON.parse(await response.text());
+        message = parsed.error || message;
+      } catch { /* keep default */ }
+      throw new Error(message);
+    }
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = /filename="?([^";]+)"?/.exec(disposition);
+    return {
+      blob: await response.blob(),
+      filename: match ? match[1] : `lifemap-activity-log-${new Date().toISOString().slice(0, 10)}.csv`,
+    };
+  }
+
+  async getDeletedItems() {
+    return this.request('/admin/deleted-items');
+  }
+
+  async restoreDeletedItem(id) {
+    return this.request(`/admin/deleted-items/${id}/restore`, { method: 'POST' });
+  }
+
+  async purgeDeletedItem(id) {
+    return this.request(`/admin/deleted-items/${id}/purge`, { method: 'POST' });
+  }
+
+  async getPrivacyRequestsAdmin(status) {
+    return this.request(`/admin/privacy-requests${toQuery({ status })}`);
+  }
+
+  // Body: { status?: 'Received' | 'In progress' | 'Closed' | 'Rejected', notes? }
+  async updatePrivacyRequest(id, { status, notes } = {}) {
+    return this.request(`/admin/privacy-requests/${id}`, {
+      method: 'PATCH',
+      body: { status, notes },
+    });
+  }
+
+  async getAccessReview() {
+    return this.request('/admin/access-review');
   }
 
   // Admin - User Management
@@ -603,9 +752,11 @@ class ApiService {
     });
   }
 
-  async deleteUser(userId) {
+  // Soft delete (recoverable for 90 days); a reason is required
+  async deleteUser(userId, reason) {
     return this.request(`/admin/admin/users/${userId}`, {
       method: 'DELETE',
+      body: { reason },
     });
   }
 
