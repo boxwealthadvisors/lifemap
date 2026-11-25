@@ -10,6 +10,7 @@ import ClientPlanView from '../components/ClientPlanView';
 import {
   ActivityLogSection,
   AdminTabs,
+  DeletedItemsSection,
   PrivacyRequestsAdminSection,
   TextPromptModal,
 } from '../components/AdminSections';
@@ -17,6 +18,7 @@ import { formatDate, formatDateTime } from '../lib/password';
 
 const TABS = [
   { id: 'clients', label: 'Clients' },
+  { id: 'deleted', label: 'Deleted clients' },
   { id: 'privacy', label: 'Privacy requests' },
   { id: 'activity', label: 'Activity (team)' },
 ];
@@ -196,6 +198,7 @@ export default function AdminPage() {
         </div>
       ) : null}
 
+      {tab === 'deleted' ? <DeletedItemsSection isSuper={false} /> : null}
       {tab === 'privacy' ? <PrivacyRequestsAdminSection /> : null}
       {tab === 'activity' ? <ActivityLogSection isSuper={false} /> : null}
 

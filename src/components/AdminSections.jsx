@@ -137,7 +137,7 @@ const ACTIVITY_ACTIONS = [
   'legal_hold_set', 'legal_hold_released', 'permanent_purge', 'activity_log_exported',
 ];
 
-const EMPTY_FILTERS = { q: '', action: '', from: '', to: '', team: '', clientId: '', userId: '' };
+const EMPTY_FILTERS = { q: '', action: '', from: '', to: '', team: '', clientId: '', clientName: '', userId: '' };
 
 // Activity log. Super admin sees everything (and can filter by team); an admin sees their own team.
 export function ActivityLogSection({ isSuper = false, admins = [] }) {
@@ -272,6 +272,15 @@ export function ActivityLogSection({ isSuper = false, admins = [] }) {
         </select>
         <input
           className="lm-inp"
+          placeholder="Client name or email"
+          aria-label="Client name or email"
+          title="Filter by client name or email"
+          value={filters.clientName}
+          onChange={(e) => setFilters({ ...filters, clientName: e.target.value })}
+          style={{ minWidth: 160 }}
+        />
+        <input
+          className="lm-inp"
           inputMode="numeric"
           placeholder="Client ID"
           aria-label="Client ID"
@@ -341,7 +350,15 @@ export function ActivityLogSection({ isSuper = false, admins = [] }) {
                 <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(entry.created_at)}</td>
                 <td>{entry.actor_label || '—'}<div style={{ fontSize: 11.5, color: 'var(--lm-slate)' }}>{entry.actor_role}</div></td>
                 <td>{actionLabel(entry.action)}</td>
-                <td>{entry.target_type ? `${entry.target_type}${entry.target_id ? ` #${entry.target_id}` : ''}` : '—'}</td>
+                <td>
+                  {entry.target_label
+                    || (entry.target_type ? `${entry.target_type}${entry.target_id ? ` #${entry.target_id}` : ''}` : '—')}
+                  {entry.target_label && entry.target_type ? (
+                    <div style={{ fontSize: 11.5, color: 'var(--lm-slate)' }}>
+                      {entry.target_type}{entry.target_id ? ` #${entry.target_id}` : ''}
+                    </div>
+                  ) : null}
+                </td>
                 {isSuper ? <td>{entry.team_label || '—'}</td> : null}
                 <td style={{ maxWidth: 320, fontSize: 12.5, color: 'var(--lm-muted)', wordBreak: 'break-word' }}>{compactMeta(entry.meta) || '—'}</td>
               </tr>
@@ -591,7 +608,7 @@ const DELETED_TYPE_LABEL = {
 };
 
 // Recycle bin (super admin): restore within 90 days or purge permanently
-export function DeletedItemsSection({ onChanged }) {
+export function DeletedItemsSection({ onChanged, isSuper = true }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -658,8 +675,9 @@ export function DeletedItemsSection({ onChanged }) {
         <span className="count">{items.length} items</span>
       </div>
       <p className="lm-hint" style={{ padding: '0 16px 8px', margin: 0 }}>
-        Deleted clients, admins and plan entries (goals, expenses, loans, assets, insurance...) can be restored until
-        their purge date (90 days), then are removed permanently. Items under legal hold are never purged automatically.
+        {isSuper
+          ? 'Deleted clients, admins and plan entries can be restored until their purge date (90 days). Items under legal hold are never purged automatically.'
+          : 'Clients you deleted from your team. Names and emails stay visible here. Only a super admin can restore or permanently delete them.'}
       </p>
       <div className="lm-tblwrap">
         <table className="lm-tbl">
@@ -671,20 +689,22 @@ export function DeletedItemsSection({ onChanged }) {
               <th>Reason</th>
               <th>Deleted</th>
               <th>Purges on</th>
-              <th></th>
+              {isSuper ? <th></th> : null}
             </tr>
           </thead>
           <tbody>
             {loading && items.length === 0 ? (
-              <tr><td className="empty" colSpan={7}>Loading…</td></tr>
+              <tr><td className="empty" colSpan={isSuper ? 7 : 6}>Loading…</td></tr>
             ) : items.length === 0 ? (
-              <tr><td className="empty" colSpan={7}>Nothing has been deleted</td></tr>
+              <tr><td className="empty" colSpan={isSuper ? 7 : 6}>Nothing has been deleted</td></tr>
             ) : items.map((item) => (
               <tr key={item.id}>
                 <td>{DELETED_TYPE_LABEL[item.entity_type] || item.entity_type}</td>
                 <td>
-                  {item.label || '—'}
-                  {item.client_name ? <div style={{ fontSize: 11.5, color: 'var(--lm-slate)' }}>Client: {item.client_name}</div> : null}
+                  {item.label || item.client_name || '—'}
+                  {item.client_name && item.label && item.client_name !== item.label ? (
+                    <div style={{ fontSize: 11.5, color: 'var(--lm-slate)' }}>Client: {item.client_name}</div>
+                  ) : null}
                 </td>
                 <td>{item.email || '—'}</td>
                 <td style={{ maxWidth: 260, wordBreak: 'break-word' }}>{item.reason || '—'}</td>
@@ -693,24 +713,26 @@ export function DeletedItemsSection({ onChanged }) {
                   {formatDate(item.purge_after)}
                   {item.legal_hold ? <div><span className="lm-badge warn">Legal hold</span></div> : null}
                 </td>
-                <td>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button type="button" className="lm-ghost" disabled={busyId === item.id} onClick={() => restore(item)}>Restore</button>
-                    <button type="button" className="lm-ghost" disabled={busyId === item.id} onClick={() => toggleHold(item)}>
-                      {item.legal_hold ? 'Release hold' : 'Legal hold'}
-                    </button>
-                    <button
-                      type="button"
-                      className="lm-ghost"
-                      disabled={Boolean(item.legal_hold)}
-                      title={item.legal_hold ? 'Release the legal hold first' : undefined}
-                      onClick={() => setPurgeTarget(item)}
-                      style={item.legal_hold ? undefined : { color: '#b42318' }}
-                    >
-                      Purge
-                    </button>
-                  </div>
-                </td>
+                {isSuper ? (
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button type="button" className="lm-ghost" disabled={busyId === item.id} onClick={() => restore(item)}>Restore</button>
+                      <button type="button" className="lm-ghost" disabled={busyId === item.id} onClick={() => toggleHold(item)}>
+                        {item.legal_hold ? 'Release hold' : 'Legal hold'}
+                      </button>
+                      <button
+                        type="button"
+                        className="lm-ghost"
+                        disabled={Boolean(item.legal_hold)}
+                        title={item.legal_hold ? 'Release the legal hold first' : undefined}
+                        onClick={() => setPurgeTarget(item)}
+                        style={item.legal_hold ? undefined : { color: '#b42318' }}
+                      >
+                        Purge
+                      </button>
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>

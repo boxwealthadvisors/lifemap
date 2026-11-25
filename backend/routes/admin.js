@@ -1266,7 +1266,11 @@ router.delete('/admin/users/:userId', authenticateAdmin, [idParam('userId')], as
       targetType: 'user',
       targetId: Number(userId),
       teamAdminId: owned.admin_id || null,
-      meta: { reason },
+      meta: {
+        reason,
+        clientName: full.rows[0]?.name || null,
+        clientEmail: full.rows[0]?.email || null,
+      },
     });
 
     res.json({ message: 'User deleted. It can be restored for 90 days.' });
@@ -1380,6 +1384,30 @@ function buildActivityFilter(req) {
     );
   }
 
+  // clientName: match client name or email (live "user" row, log meta, or actor label)
+  if (req.query.clientName) {
+    const like = `%${String(req.query.clientName).trim().replace(/[\\%_]/g, '\\$&')}%`;
+    params.push(like);
+    const n = params.length;
+    where.push(`(
+      al.meta->>'clientName' ILIKE $${n}
+      OR al.meta->>'clientEmail' ILIKE $${n}
+      OR al.actor_label ILIKE $${n}
+      OR (
+        al.target_type = 'user' AND EXISTS (
+          SELECT 1 FROM "user" u
+          WHERE u.id = al.target_id AND (u.name ILIKE $${n} OR u.email ILIKE $${n})
+        )
+      )
+      OR (
+        al.actor_role = 'client' AND EXISTS (
+          SELECT 1 FROM "user" u
+          WHERE u.id = al.actor_id AND (u.name ILIKE $${n} OR u.email ILIKE $${n})
+        )
+      )
+    )`);
+  }
+
   // userId: the actor (staff or client) that performed the action
   if (req.query.userId) {
     const userId = Number.parseInt(req.query.userId, 10);
@@ -1407,7 +1435,17 @@ function buildActivityFilter(req) {
     params.push(like);
     const n = params.length;
     where.push(
-      `(al.actor_label ILIKE $${n} OR al.action ILIKE $${n} OR al.target_type ILIKE $${n} OR al.meta::text ILIKE $${n})`
+      `(al.actor_label ILIKE $${n}
+        OR al.action ILIKE $${n}
+        OR al.target_type ILIKE $${n}
+        OR al.meta::text ILIKE $${n}
+        OR al.meta->>'clientName' ILIKE $${n}
+        OR (
+          al.target_type = 'user' AND EXISTS (
+            SELECT 1 FROM "user" u
+            WHERE u.id = al.target_id AND (u.name ILIKE $${n} OR u.email ILIKE $${n})
+          )
+        ))`
     );
   }
 
@@ -1416,9 +1454,21 @@ function buildActivityFilter(req) {
 
 const ACTIVITY_SELECT = `
   SELECT al.id, al.actor_role, al.actor_id, al.actor_label, al.action, al.target_type, al.target_id,
-         al.team_admin_id, ta.username AS team_label, al.meta, al.created_at
+         al.team_admin_id, ta.username AS team_label, al.meta, al.created_at,
+         CASE
+           WHEN al.target_type = 'user' THEN COALESCE(
+             NULLIF(al.meta->>'clientName', ''),
+             tu.name,
+             tu.email,
+             'Client #' || al.target_id::text
+           )
+           WHEN al.target_type = 'admin' THEN COALESCE(tadm.name, tadm.username, 'Admin #' || al.target_id::text)
+           ELSE NULL
+         END AS target_label
   FROM activity_log al
-  LEFT JOIN admin ta ON ta.id = al.team_admin_id`;
+  LEFT JOIN admin ta ON ta.id = al.team_admin_id
+  LEFT JOIN "user" tu ON al.target_type = 'user' AND tu.id = al.target_id
+  LEFT JOIN admin tadm ON al.target_type = 'admin' AND tadm.id = al.target_id`;
 
 // Super admin: everything. Admin: own team only.
 router.get('/activity-log', authenticateAdmin, async (req, res) => {
@@ -1466,7 +1516,7 @@ router.get('/activity-log/export.csv', authenticateAdmin, async (req, res) => {
       filter.params
     );
 
-    const header = ['id', 'created_at', 'actor_role', 'actor_id', 'actor_label', 'action', 'target_type', 'target_id', 'team_admin_id', 'team_label', 'meta'];
+    const header = ['id', 'created_at', 'actor_role', 'actor_id', 'actor_label', 'action', 'target_type', 'target_id', 'target_label', 'team_admin_id', 'team_label', 'meta'];
     const lines = [header.join(',')];
     for (const row of rows.rows) {
       lines.push([
@@ -1478,6 +1528,7 @@ router.get('/activity-log/export.csv', authenticateAdmin, async (req, res) => {
         row.action,
         row.target_type,
         row.target_id,
+        row.target_label,
         row.team_admin_id,
         row.team_label,
         JSON.stringify(row.meta || {}),
@@ -1576,14 +1627,24 @@ router.get('/deleted-items', authenticateAdmin, async (req, res) => {
       `SELECT di.id, di.entity_type, di.entity_id, di.reason, di.deleted_by_role, di.deleted_by_id,
               di.deleted_at, di.purge_after, di.restored_at,
               COALESCE(di.legal_hold, FALSE) AS legal_hold,
-              COALESCE(di.payload->>'name', di.payload->>'username', di.payload->>'description',
-                       di.payload->>'stream', di.payload->>'policy_type', di.payload->>'lender') AS label,
-              COALESCE(di.payload->>'email', ou.email) AS email,
+              COALESCE(
+                NULLIF(di.payload->>'name', ''),
+                NULLIF(di.payload->>'username', ''),
+                NULLIF(ou.name, ''),
+                NULLIF(di.payload->>'description', ''),
+                NULLIF(di.payload->>'stream', ''),
+                NULLIF(di.payload->>'policy_type', ''),
+                NULLIF(di.payload->>'lender', ''),
+                CASE WHEN di.entity_type = 'user' THEN 'Client #' || di.entity_id::text ELSE NULL END
+              ) AS label,
+              COALESCE(NULLIF(di.payload->>'email', ''), ou.email) AS email,
               di.payload->>'username' AS username,
-              ou.name AS client_name
+              COALESCE(NULLIF(di.payload->>'name', ''), ou.name) AS client_name
        FROM deleted_items di
-       LEFT JOIN "user" ou
-         ON di.entity_type NOT IN ('user', 'admin') AND ou.id::text = di.payload->>'user_id'
+       LEFT JOIN "user" ou ON (
+         (di.entity_type = 'user' AND ou.id = di.entity_id)
+         OR (di.entity_type NOT IN ('user', 'admin') AND ou.id::text = di.payload->>'user_id')
+       )
        WHERE di.restored_at IS NULL ${scope}
        ORDER BY di.deleted_at DESC`,
       params

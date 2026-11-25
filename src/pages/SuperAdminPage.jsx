@@ -398,7 +398,7 @@ export default function SuperAdminPage() {
       ) : null}
 
       {tab === 'activity' ? <ActivityLogSection isSuper admins={admins} /> : null}
-      {tab === 'deleted' ? <DeletedItemsSection onChanged={loadData} /> : null}
+      {tab === 'deleted' ? <DeletedItemsSection isSuper onChanged={loadData} /> : null}
       {tab === 'privacy' ? <PrivacyRequestsAdminSection /> : null}
       {tab === 'access' ? <AccessReviewSection onChanged={loadData} /> : null}
 
